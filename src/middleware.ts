@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const PUBLIC_PATHS = ['/login', '/api/auth/']
+const isDev = process.env.NODE_ENV !== 'production'
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -13,6 +14,10 @@ export function middleware(request: NextRequest) {
   // Check for session cookie
   const sessionToken = request.cookies.get('ccc_session')?.value
   if (!sessionToken) {
+    // In development, auto-login instead of showing login page
+    if (isDev) {
+      return NextResponse.redirect(new URL('/api/auth/dev-login', request.url))
+    }
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirect', pathname)
     return NextResponse.redirect(loginUrl)
