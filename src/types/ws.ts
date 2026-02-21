@@ -5,6 +5,7 @@ export type ClientMessage =
   | { type: 'start'; projectPath: string; prompt: string; permissionMode: string; model?: string }
   | { type: 'send'; sessionId: string; prompt: string }
   | { type: 'stop'; sessionId: string }
+  | { type: 'subscribe'; sessionId: string }
 
 // Server → Client messages
 export type ServerMessage =

@@ -83,6 +83,10 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
     sendMessage({ type: 'stop', sessionId: sid })
   }, [sendMessage])
 
+  const subscribe = useCallback((sid: string) => {
+    sendMessage({ type: 'subscribe', sessionId: sid })
+  }, [sendMessage])
+
   const disconnect = useCallback(() => {
     wsRef.current?.close()
     wsRef.current = null
@@ -103,6 +107,7 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
     startSession,
     sendPrompt,
     stopSession,
+    subscribe,
     setMessages,
   }
 }

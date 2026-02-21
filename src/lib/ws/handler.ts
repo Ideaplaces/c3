@@ -29,6 +29,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
   switch (message.type) {
     case 'start': {
       try {
+        console.log(`[WS] Starting session: ${message.projectPath} | mode: ${message.permissionMode}`)
         const sessionId = await sessionManager.startSession({
           projectPath: message.projectPath,
           prompt: message.prompt,
@@ -90,6 +91,48 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
         await sessionManager.resumeSession(message.sessionId, message.prompt)
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to send message' })
+      }
+      break
+    }
+
+    case 'subscribe': {
+      try {
+        const sessionId = message.sessionId
+        console.log(`[WS] Subscribe request for session: ${sessionId}`)
+
+        // Replay buffered events
+        const buffered = sessionManager.getBufferedEvents(sessionId)
+        console.log(`[WS] Replaying ${buffered.length} buffered events for session ${sessionId}`)
+        for (const event of buffered) {
+          send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
+        }
+
+        // If session is still running, attach live event relay
+        if (sessionManager.isSessionActive(sessionId)) {
+          send(ws, { type: 'session_started', sessionId })
+
+          const onSdkEvent = (sid: string, sdkMessage: unknown) => {
+            if (sid === sessionId) {
+              send(ws, { type: 'sdk_event', sessionId, message: sdkMessage as SDKMessage })
+            }
+          }
+
+          const onSessionEnded = (sid: string, reason: string) => {
+            if (sid === sessionId) {
+              send(ws, { type: 'session_ended', sessionId, reason })
+              sessionManager.removeListener('sdk_event', onSdkEvent)
+              sessionManager.removeListener('session_ended', onSessionEnded)
+            }
+          }
+
+          sessionManager.on('sdk_event', onSdkEvent)
+          sessionManager.on('session_ended', onSessionEnded)
+        } else {
+          // Session already ended
+          send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
+        }
+      } catch (error) {
+        send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to subscribe' })
       }
       break
     }
