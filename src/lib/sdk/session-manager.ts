@@ -21,11 +21,16 @@ interface StartSessionParams {
 
 class SessionManager extends EventEmitter {
   private activeSessions = new Map<string, ActiveSession>()
+  private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
 
   async startSession(params: StartSessionParams): Promise<string> {
     const { projectPath, prompt, permissionMode, model } = params
     const sessionId = randomUUID()
     const abortController = new AbortController()
+
+    // Strip CLAUDECODE env var to allow nested SDK sessions
+    const cleanEnv = { ...process.env }
+    delete cleanEnv.CLAUDECODE
 
     const options: Options = {
       cwd: projectPath,
@@ -33,6 +38,7 @@ class SessionManager extends EventEmitter {
       includePartialMessages: true,
       settingSources: ['project'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
+      env: cleanEnv,
       ...(model && { model }),
     }
 
@@ -99,12 +105,16 @@ class SessionManager extends EventEmitter {
     // Session is not active, start a new query with resume
     const abortController = new AbortController()
 
+    const cleanEnv = { ...process.env }
+    delete cleanEnv.CLAUDECODE
+
     const options: Options = {
       resume: sessionId,
       abortController,
       includePartialMessages: true,
       settingSources: ['project'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
+      env: cleanEnv,
     }
 
     const q = query({ prompt, options })
@@ -139,9 +149,21 @@ class SessionManager extends EventEmitter {
     return this.activeSessions.has(sessionId)
   }
 
+  getBufferedEvents(sessionId: string): { sessionId: string; message: unknown }[] {
+    return this.eventBuffers.get(sessionId) || []
+  }
+
   private async processMessages(sessionId: string, q: Query) {
+    // Initialize event buffer for this session
+    this.eventBuffers.set(sessionId, [])
+
     try {
       for await (const message of q) {
+        // Buffer the event for late subscribers
+        const buffer = this.eventBuffers.get(sessionId)
+        if (buffer) {
+          buffer.push({ sessionId, message })
+        }
         this.emit('sdk_event', sessionId, message)
         this.handleMessageMetadata(sessionId, message)
       }

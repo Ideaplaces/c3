@@ -22,6 +22,7 @@ app.prepare().then(() => {
 
   server.on('upgrade', (request, socket, head) => {
     const { pathname, query } = parse(request.url!, true)
+    console.log(`[WS] Upgrade request: ${pathname}`)
 
     if (pathname !== '/ws') {
       socket.destroy()
@@ -42,6 +43,7 @@ app.prepare().then(() => {
       return
     }
 
+    console.log(`[WS] Authenticated: ${user.email}`)
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request)
       handleConnection(ws, user)
