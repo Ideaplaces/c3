@@ -7,7 +7,6 @@ import { ToolCallBlock } from './tools/ToolCallBlock'
 
 interface ChatMessageProps {
   message: SDKMessage
-  // Map of tool_use_id -> tool result content for pairing tool calls with their results
   toolResults?: Map<string, { content: string; isError: boolean }>
 }
 
@@ -17,17 +16,15 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       if ('subtype' in message) {
         if (message.subtype === 'init') {
           return (
-            <div className="text-foreground-muted text-sm py-2 px-3 bg-surface rounded-md border border-border">
-              Session started &middot; Model: <span className="font-mono text-secondary">{message.model}</span>
-              {' '}&middot; Mode: <span className="font-mono">{message.permissionMode}</span>
-              {' '}&middot; Tools: {message.tools.length}
+            <div className="text-foreground-muted text-xs py-1.5 px-3 bg-surface/50 rounded border border-border/50 inline-block">
+              {message.model} &middot; {message.permissionMode} &middot; {message.tools.length} tools
             </div>
           )
         }
         if (message.subtype === 'status') {
           if (message.status === 'compacting') {
             return (
-              <div className="text-foreground-muted text-sm py-1 italic">
+              <div className="text-foreground-muted text-xs py-1 italic">
                 Compacting context...
               </div>
             )
@@ -39,25 +36,30 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
     }
 
     case 'user': {
-      const content = typeof message.message.content === 'string'
-        ? message.message.content
-        : JSON.stringify(message.message.content)
+      const content = message.message.content
 
-      if ('isReplay' in message && message.isReplay) {
-        return (
-          <div className="text-foreground-muted text-sm py-1 italic">
-            (replayed) {content}
-          </div>
+      // Skip tool_result messages entirely — they're shown inline with tool calls
+      if (Array.isArray(content)) {
+        const hasToolResult = content.some(
+          (block: unknown) => typeof block === 'object' && block !== null && 'type' in block && (block as { type: string }).type === 'tool_result'
         )
+        if (hasToolResult) return null
       }
+
+      const text = typeof content === 'string'
+        ? content
+        : JSON.stringify(content)
+
+      // Skip replayed messages (they're context, not new conversation)
+      if ('isReplay' in message && message.isReplay) return null
 
       return (
         <div className="flex gap-3 py-3">
-          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary text-sm font-bold shrink-0">
+          <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
             U
           </div>
-          <div className="flex-1 font-mono text-sm whitespace-pre-wrap pt-1">
-            {content}
+          <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5">
+            {text}
           </div>
         </div>
       )
@@ -67,14 +69,44 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const blocks: any[] = message.message.content || []
 
+      // Separate text/thinking blocks from tool_use blocks
+      const textBlocks = blocks.filter((b) => b.type === 'text' && b.text?.trim())
+      const thinkingBlocks = blocks.filter((b) => b.type === 'thinking' && b.thinking)
+      const toolBlocks = blocks.filter((b) => b.type === 'tool_use')
+
+      const hasText = textBlocks.length > 0
+      const hasThinking = thinkingBlocks.length > 0
+      const hasTools = toolBlocks.length > 0
+
+      // If this message is ONLY tool calls (no text), render compactly without the avatar
+      if (!hasText && !hasThinking && hasTools) {
+        return (
+          <div className="pl-10 space-y-1">
+            {toolBlocks.map((block, i) => {
+              const result = toolResults?.get(block.id)
+              return (
+                <ToolCallBlock
+                  key={i}
+                  toolName={block.name}
+                  toolId={block.id}
+                  input={block.input as Record<string, unknown>}
+                  output={result?.content}
+                  isError={result?.isError}
+                />
+              )
+            })}
+          </div>
+        )
+      }
+
       return (
-        <div className="flex gap-3 py-3">
-          <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-sm font-bold shrink-0">
+        <div className="flex gap-3 py-2">
+          <div className="w-7 h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
             C
           </div>
           <div className="flex-1 space-y-2 min-w-0">
             {blocks.map((block, i) => {
-              if (block.type === 'text') {
+              if (block.type === 'text' && block.text?.trim()) {
                 return <MarkdownRenderer key={i} content={block.text} />
               }
               if (block.type === 'thinking') {
@@ -93,11 +125,6 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
                   />
                 )
               }
-              if (block.type === 'tool_result') {
-                // Tool results are shown inline with their corresponding tool_use
-                // via toolResults prop. Skip standalone rendering.
-                return null
-              }
               return null
             })}
           </div>
@@ -108,25 +135,18 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
     case 'result': {
       const isError = message.subtype !== 'success'
       return (
-        <div className={`text-sm py-2 px-3 rounded-md border ${
+        <div className={`text-xs py-1.5 px-3 rounded border inline-block ${
           isError ? 'bg-error/10 border-error/30 text-error' : 'bg-success/10 border-success/30 text-success'
         }`}>
-          {isError ? 'Error' : 'Completed'}
-          {' '}&middot; Turns: {message.num_turns}
-          {' '}&middot; Cost: ${message.total_cost_usd.toFixed(4)}
-          {message.subtype === 'success' && message.result && (
-            <div className="mt-1 text-foreground text-xs font-mono whitespace-pre-wrap">
-              {message.result.slice(0, 500)}
-            </div>
-          )}
+          {isError ? 'Error' : 'Done'}
+          {' '}&middot; {message.num_turns} turns
+          {' '}&middot; ${message.total_cost_usd.toFixed(4)}
         </div>
       )
     }
 
-    case 'stream_event': {
-      // Stream events are handled by the stream accumulator
+    case 'stream_event':
       return null
-    }
 
     default:
       return null

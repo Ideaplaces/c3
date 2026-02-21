@@ -7,6 +7,7 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { ChatMessage } from './ChatMessage'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { useStreamAccumulator, type AccumulatedBlock } from '@/hooks/useStreamAccumulator'
+import { getToolSummary } from '@/lib/messages/parser'
 
 interface SessionViewProps {
   ws: {
@@ -18,16 +19,38 @@ interface SessionViewProps {
   }
   sessionId?: string
   projectName: string
+  loadingStatus?: string
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4 text-secondary" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  )
+}
+
+function LoadingIndicator({ status }: { status: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4">
+      <Spinner />
+      <div className="text-foreground-muted text-sm">{status}</div>
+      <div className="text-foreground-muted/50 text-xs">
+        Claude Code is starting up — this can take 5-15 seconds
+      </div>
+    </div>
+  )
 }
 
 function StreamingBlock({ block }: { block: AccumulatedBlock }) {
   if (block.type === 'thinking') {
     return (
       <details className="text-foreground-muted text-sm" open={!block.complete}>
-        <summary className="cursor-pointer hover:text-foreground">
+        <summary className="cursor-pointer hover:text-foreground text-xs">
           {block.complete ? 'Thought' : 'Thinking...'}
         </summary>
-        <div className="mt-1 pl-4 border-l-2 border-border whitespace-pre-wrap text-xs font-mono">
+        <div className="mt-1 pl-3 border-l-2 border-border whitespace-pre-wrap text-xs font-mono max-h-[200px] overflow-y-auto">
           {block.content}
         </div>
       </details>
@@ -36,15 +59,13 @@ function StreamingBlock({ block }: { block: AccumulatedBlock }) {
 
   if (block.type === 'tool_use') {
     return (
-      <div className="card p-3 text-sm">
-        <div className="font-medium text-secondary mb-1">
-          {block.toolName}
-        </div>
+      <div className="text-xs text-foreground-muted font-mono flex items-center gap-1.5 py-0.5">
+        <span className="text-secondary">{'>'}</span>
+        <span>{block.toolName}</span>
         {block.toolInput && (
-          <pre className="text-xs text-foreground-muted overflow-x-auto">
-            {block.toolInput}
-          </pre>
+          <span className="truncate opacity-60">{block.toolInput.slice(0, 60)}</span>
         )}
+        {!block.complete && <Spinner />}
       </div>
     )
   }
@@ -53,12 +74,136 @@ function StreamingBlock({ block }: { block: AccumulatedBlock }) {
   return (
     <div className="text-sm whitespace-pre-wrap break-words">
       {block.content}
-      {!block.complete && <span className="animate-pulse">|</span>}
+      {!block.complete && <span className="animate-pulse text-secondary">|</span>}
     </div>
   )
 }
 
-export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
+// Group messages into logical display groups
+interface DisplayGroup {
+  type: 'user' | 'assistant-text' | 'activity' | 'system' | 'result'
+  messages: SDKMessage[]
+  // For activity groups: summary of tool calls
+  toolSummaries?: string[]
+}
+
+function groupMessages(messages: SDKMessage[]): DisplayGroup[] {
+  const groups: DisplayGroup[] = []
+  let currentActivity: SDKMessage[] = []
+  let currentToolSummaries: string[] = []
+
+  const flushActivity = () => {
+    if (currentActivity.length > 0) {
+      groups.push({
+        type: 'activity',
+        messages: [...currentActivity],
+        toolSummaries: [...currentToolSummaries],
+      })
+      currentActivity = []
+      currentToolSummaries = []
+    }
+  }
+
+  for (const msg of messages) {
+    if (msg.type === 'system') {
+      flushActivity()
+      groups.push({ type: 'system', messages: [msg] })
+      continue
+    }
+
+    if (msg.type === 'result') {
+      flushActivity()
+      groups.push({ type: 'result', messages: [msg] })
+      continue
+    }
+
+    if (msg.type === 'user') {
+      // Check if this is a tool_result message (skip it)
+      const content = msg.message.content
+      if (Array.isArray(content)) {
+        const hasToolResult = content.some(
+          (block: unknown) => typeof block === 'object' && block !== null && 'type' in block && (block as { type: string }).type === 'tool_result'
+        )
+        if (hasToolResult) {
+          // Tool results are part of the current activity flow
+          currentActivity.push(msg)
+          continue
+        }
+      }
+      // Real user message
+      flushActivity()
+      groups.push({ type: 'user', messages: [msg] })
+      continue
+    }
+
+    if (msg.type === 'assistant') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blocks: any[] = msg.message.content || []
+      const hasText = blocks.some((b) => b.type === 'text' && b.text?.trim())
+      const toolUses = blocks.filter((b) => b.type === 'tool_use')
+
+      if (hasText) {
+        // This assistant message has actual text content — show it prominently
+        flushActivity()
+        groups.push({ type: 'assistant-text', messages: [msg] })
+      } else if (toolUses.length > 0) {
+        // Tool-only message — accumulate into activity group
+        currentActivity.push(msg)
+        for (const tool of toolUses) {
+          currentToolSummaries.push(
+            getToolSummary(tool.name, tool.input as Record<string, unknown>)
+          )
+        }
+      } else {
+        // Thinking-only or empty — accumulate
+        currentActivity.push(msg)
+      }
+      continue
+    }
+
+    // stream_event or other
+    continue
+  }
+
+  flushActivity()
+  return groups
+}
+
+function ActivityGroup({ group, toolResults }: {
+  group: DisplayGroup
+  toolResults: Map<string, { content: string; isError: boolean }>
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const count = group.toolSummaries?.length || 0
+
+  return (
+    <div className="border border-border/50 rounded-md overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface/50 transition-colors"
+      >
+        <span className="text-xs text-foreground-muted select-none">{expanded ? '▼' : '▶'}</span>
+        <span className="text-xs text-foreground-muted">
+          {count} operation{count !== 1 ? 's' : ''}
+        </span>
+        {!expanded && group.toolSummaries && group.toolSummaries.length > 0 && (
+          <span className="text-xs text-foreground-muted/60 truncate flex-1 font-mono">
+            — {group.toolSummaries.slice(-3).join(', ')}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="border-t border-border/50 px-2 py-1 space-y-0.5 max-h-[400px] overflow-y-auto">
+          {group.messages.map((msg, i) => (
+            <ChatMessage key={i} message={msg} toolResults={toolResults} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { state: streamState, processEvent, reset: resetStream } = useStreamAccumulator()
@@ -79,7 +224,6 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
   // Build tool results map: tool_use_id -> { content, isError }
   const toolResults = useMemo(() => {
     const map = new Map<string, { content: string; isError: boolean }>()
-    // Look through user messages for tool_result content blocks
     for (const msg of sdkMessages) {
       if (msg.type !== 'user') continue
       const content = msg.message.content
@@ -103,6 +247,9 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
     }
     return map
   }, [sdkMessages])
+
+  // Group messages for display
+  const displayGroups = useMemo(() => groupMessages(sdkMessages), [sdkMessages])
 
   // Process streaming events
   const streamEvents = ws.messages
@@ -136,6 +283,9 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
     streamState.blocks.length + sdkMessages.length
   )
 
+  // Determine if we're still in initial loading
+  const isLoading = loadingStatus && sdkMessages.length === 0 && streamState.blocks.length === 0
+
   const handleSend = () => {
     if (!input.trim() || !activeSessionId) return
     ws.sendPrompt(activeSessionId, input.trim())
@@ -153,17 +303,17 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="border-b border-border px-4 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors">
+      <header className="border-b border-border px-4 py-2.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors text-sm">
             &larr; Sessions
           </Link>
           {displayProject && (
             <span className="font-medium font-mono text-sm">{displayProject}</span>
           )}
           {isRunning && (
-            <span className="badge badge-info animate-pulse-glow">
-              <span className="w-2 h-2 rounded-full bg-current mr-1.5 animate-pulse" />
+            <span className="inline-flex items-center gap-1.5 text-xs text-info">
+              <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
               Running
             </span>
           )}
@@ -172,7 +322,7 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
           {isRunning && activeSessionId && (
             <button
               onClick={() => ws.stopSession(activeSessionId)}
-              className="btn btn-destructive px-3 py-1.5 text-sm"
+              className="btn btn-destructive px-3 py-1 text-xs"
             >
               Stop
             </button>
@@ -182,27 +332,47 @@ export function SessionView({ ws, sessionId, projectName }: SessionViewProps) {
 
       {/* Messages area */}
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 relative">
-        {sdkMessages.length === 0 && streamState.blocks.length === 0 && (
-          <div className="flex items-center justify-center h-full text-foreground-muted">
-            {ws.connected ? 'Waiting for response...' : 'Connecting...'}
+        {isLoading ? (
+          <LoadingIndicator status={loadingStatus} />
+        ) : sdkMessages.length === 0 && streamState.blocks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3">
+            <Spinner />
+            <div className="text-foreground-muted text-sm">Waiting for Claude...</div>
           </div>
-        )}
-        {sdkMessages.map((msg, i) => (
-          <ChatMessage key={i} message={msg} toolResults={toolResults} />
-        ))}
+        ) : (
+          <>
+            {displayGroups.map((group, i) => {
+              if (group.type === 'activity') {
+                return <ActivityGroup key={i} group={group} toolResults={toolResults} />
+              }
+              // For non-activity groups, render each message directly
+              return group.messages.map((msg, j) => (
+                <ChatMessage key={`${i}-${j}`} message={msg} toolResults={toolResults} />
+              ))
+            })}
 
-        {/* Streaming content */}
-        {streamState.blocks.length > 0 && (
-          <div className="flex gap-3 py-2">
-            <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-sm font-bold shrink-0">
-              C
-            </div>
-            <div className="flex-1 space-y-2 min-w-0">
-              {streamState.blocks.map((block, i) => (
-                <StreamingBlock key={i} block={block} />
-              ))}
-            </div>
-          </div>
+            {/* Streaming content */}
+            {streamState.blocks.length > 0 && (
+              <div className="flex gap-3 py-2">
+                <div className="w-7 h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
+                  C
+                </div>
+                <div className="flex-1 space-y-1 min-w-0">
+                  {streamState.blocks.map((block, i) => (
+                    <StreamingBlock key={i} block={block} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Show spinner when running but no new streaming content */}
+            {isRunning && streamState.blocks.length === 0 && (
+              <div className="flex items-center gap-2 py-2 text-foreground-muted text-xs">
+                <Spinner />
+                Claude is working...
+              </div>
+            )}
+          </>
         )}
 
         {/* Scroll to bottom button */}
