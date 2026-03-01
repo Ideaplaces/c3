@@ -9,6 +9,10 @@ vi.mock('fs', () => ({
   existsSync: vi.fn((path: string) => mockExists.has(path)),
 }))
 
+vi.mock('os', () => ({
+  homedir: vi.fn(() => '/home/testuser'),
+}))
+
 import { discoverProjects } from '@/lib/projects/discover'
 
 describe('discoverProjects', () => {
@@ -18,19 +22,26 @@ describe('discoverProjects', () => {
     vi.stubEnv('CCC_PROJECT_DIRS', '')
   })
 
-  it('returns empty array when no scan dirs configured', () => {
-    expect(discoverProjects()).toEqual([])
+  it('always includes full access entry even with no scan dirs', () => {
+    const projects = discoverProjects()
+    expect(projects).toHaveLength(1)
+    expect(projects[0]).toEqual({
+      name: 'testuser (full access)',
+      path: '/home/testuser',
+    })
   })
 
-  it('discovers git repos in scan directories', () => {
+  it('discovers git repos and includes workspace and full access entries', () => {
     vi.stubEnv('CCC_PROJECT_DIRS', '/home/user/projects')
     mockExists.add('/home/user/projects')
     mockExists.add('/home/user/projects/my-app/.git')
     mockDirs['/home/user/projects'] = ['my-app', 'not-a-repo']
 
     const projects = discoverProjects()
-    expect(projects).toHaveLength(1)
-    expect(projects[0]).toEqual({
+    expect(projects).toHaveLength(3)
+    expect(projects[0].name).toBe('testuser (full access)')
+    expect(projects[1].name).toBe('projects (workspace)')
+    expect(projects[2]).toEqual({
       name: 'my-app',
       path: '/home/user/projects/my-app',
     })
@@ -43,10 +54,13 @@ describe('discoverProjects', () => {
     mockDirs['/home/user/projects'] = ['.hidden']
 
     const projects = discoverProjects()
-    expect(projects).toHaveLength(0)
+    // Full access + workspace entry, no hidden repos
+    expect(projects).toHaveLength(2)
+    expect(projects[0].name).toBe('testuser (full access)')
+    expect(projects[1].name).toBe('projects (workspace)')
   })
 
-  it('sorts projects alphabetically', () => {
+  it('sorts projects alphabetically after full access and workspace entries', () => {
     vi.stubEnv('CCC_PROJECT_DIRS', '/home/user/projects')
     mockExists.add('/home/user/projects')
     mockExists.add('/home/user/projects/zebra/.git')
@@ -54,7 +68,9 @@ describe('discoverProjects', () => {
     mockDirs['/home/user/projects'] = ['zebra', 'alpha']
 
     const projects = discoverProjects()
-    expect(projects[0].name).toBe('alpha')
-    expect(projects[1].name).toBe('zebra')
+    expect(projects[0].name).toBe('testuser (full access)')
+    expect(projects[1].name).toBe('projects (workspace)')
+    expect(projects[2].name).toBe('alpha')
+    expect(projects[3].name).toBe('zebra')
   })
 })

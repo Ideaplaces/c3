@@ -16,6 +16,7 @@ interface SessionViewProps {
     sessionId: string | null
     sendPrompt: (sessionId: string, prompt: string) => void
     stopSession: (sessionId: string) => void
+    loadPrevious: (sessionId: string, cursor: number) => void
   }
   sessionId?: string
   projectName: string
@@ -205,18 +206,31 @@ function ActivityGroup({ group, toolResults }: {
 
 export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
+  const [localUserMessages, setLocalUserMessages] = useState<{ text: string; idx: number }[]>([])
+  const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null)
+  const [historyHasMore, setHistoryHasMore] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [initialScrollDone, setInitialScrollDone] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { state: streamState, processEvent, reset: resetStream } = useStreamAccumulator()
 
   const activeSessionId = ws.sessionId || sessionId || null
-  const isRunning = !ws.messages.some(
-    (m) => m.type === 'session_ended'
-  ) && ws.messages.some(
-    (m) => m.type === 'session_started' || m.type === 'sdk_event'
-  )
+  const isRunning = (() => {
+    let lastStartIdx = -1
+    let lastEndIdx = -1
+    for (let i = ws.messages.length - 1; i >= 0; i--) {
+      const m = ws.messages[i]
+      if (lastStartIdx === -1 && m.type === 'session_started') lastStartIdx = i
+      if (lastEndIdx === -1 && m.type === 'session_ended') lastEndIdx = i
+      if (lastStartIdx !== -1 && lastEndIdx !== -1) break
+    }
+    return lastStartIdx > lastEndIdx
+  })()
 
-  // Extract complete SDK messages (non-streaming)
-  const sdkMessages: SDKMessage[] = ws.messages
+  // Extract complete SDK messages (non-streaming), including prepended history
+  const allMessages = [...prependedMessages, ...ws.messages]
+  const sdkMessages: SDKMessage[] = allMessages
     .filter((m): m is ServerMessage & { type: 'sdk_event' } => m.type === 'sdk_event')
     .map((m) => m.message as SDKMessage)
     .filter((m) => m.type !== 'stream_event')
@@ -274,6 +288,61 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdkMessages.length])
 
+  // Handle history_batch messages (initial metadata + load_previous responses)
+  useEffect(() => {
+    const batches = ws.messages.filter(
+      (m): m is ServerMessage & { type: 'history_batch' } => m.type === 'history_batch'
+    )
+    const lastBatch = batches[batches.length - 1]
+    if (!lastBatch) return
+
+    if (lastBatch.messages && lastBatch.messages.length > 0) {
+      // This is a load_previous response with actual messages
+      const scrollEl = containerRef.current
+      const prevScrollHeight = scrollEl?.scrollHeight || 0
+
+      const newMessages: ServerMessage[] = lastBatch.messages.map((msg) => ({
+        type: 'sdk_event' as const,
+        sessionId: lastBatch.sessionId,
+        message: msg,
+      }))
+      setPrependedMessages((prev) => [...newMessages, ...prev])
+
+      // Preserve scroll position after prepend
+      requestAnimationFrame(() => {
+        if (scrollEl) {
+          const newScrollHeight = scrollEl.scrollHeight
+          scrollEl.scrollTop += newScrollHeight - prevScrollHeight
+        }
+      })
+    }
+
+    setHistoryCursor(lastBatch.cursor)
+    setHistoryHasMore(lastBatch.hasMore)
+    setHistoryLoading(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws.messages.filter((m) => m.type === 'history_batch').length])
+
+  // Scroll to bottom on initial load
+  useEffect(() => {
+    if (initialScrollDone) return
+    if (sdkMessages.length === 0) return
+    const scrollEl = containerRef.current
+    if (scrollEl) {
+      requestAnimationFrame(() => {
+        scrollEl.scrollTop = scrollEl.scrollHeight
+        setInitialScrollDone(true)
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdkMessages.length, initialScrollDone])
+
+  const handleLoadPrevious = () => {
+    if (!activeSessionId || historyCursor === null || !historyHasMore || historyLoading) return
+    setHistoryLoading(true)
+    ws.loadPrevious(activeSessionId, historyCursor)
+  }
+
   // Detect project name from init message
   const initMessage = sdkMessages.find((m) => m.type === 'system' && 'subtype' in m && m.subtype === 'init')
   const displayProject = projectName || (initMessage && 'cwd' in initMessage ? String(initMessage.cwd).split('/').pop() : '')
@@ -288,7 +357,10 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
 
   const handleSend = () => {
     if (!input.trim() || !activeSessionId) return
-    ws.sendPrompt(activeSessionId, input.trim())
+    const text = input.trim()
+    // Track the message locally so it appears immediately in the chat
+    setLocalUserMessages((prev) => [...prev, { text, idx: sdkMessages.length }])
+    ws.sendPrompt(activeSessionId, text)
     setInput('')
     inputRef.current?.focus()
   }
@@ -334,6 +406,11 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 relative">
         {isLoading ? (
           <LoadingIndicator status={loadingStatus} />
+        ) : sdkMessages.length === 0 && streamState.blocks.length === 0 && !isRunning ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <div className="text-foreground-muted text-sm">Session history unavailable (server was restarted).</div>
+            <div className="text-foreground-muted/60 text-xs">You can send a follow-up message to continue the conversation.</div>
+          </div>
         ) : sdkMessages.length === 0 && streamState.blocks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <Spinner />
@@ -341,6 +418,23 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           </div>
         ) : (
           <>
+            {/* Load previous messages button */}
+            {historyHasMore && (
+              <div className="flex justify-center py-2">
+                <button
+                  onClick={handleLoadPrevious}
+                  disabled={historyLoading}
+                  className="btn btn-outline px-4 py-1.5 text-xs disabled:opacity-50"
+                >
+                  {historyLoading ? (
+                    <span className="flex items-center gap-2"><Spinner /> Loading...</span>
+                  ) : (
+                    'Load previous messages'
+                  )}
+                </button>
+              </div>
+            )}
+
             {displayGroups.map((group, i) => {
               if (group.type === 'activity') {
                 return <ActivityGroup key={i} group={group} toolResults={toolResults} />
@@ -350,6 +444,20 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
                 <ChatMessage key={`${i}-${j}`} message={msg} toolResults={toolResults} />
               ))
             })}
+
+            {/* Local user messages that haven't been echoed back by the SDK yet */}
+            {localUserMessages
+              .filter((m) => m.idx >= sdkMessages.length)
+              .map((m, i) => (
+                <div key={`local-${i}`} className="flex gap-3 py-3">
+                  <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                    U
+                  </div>
+                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5">
+                    {m.text}
+                  </div>
+                </div>
+              ))}
 
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (

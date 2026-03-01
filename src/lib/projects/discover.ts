@@ -1,5 +1,6 @@
 import { readdirSync, statSync, existsSync } from 'fs'
 import { join, basename } from 'path'
+import { homedir } from 'os'
 
 export interface DiscoveredProject {
   name: string
@@ -13,10 +14,17 @@ function getScanDirs(): string[] {
 
 export function discoverProjects(): DiscoveredProject[] {
   const scanDirs = getScanDirs()
+  const workspaces: DiscoveredProject[] = []
   const projects: DiscoveredProject[] = []
 
   for (const dir of scanDirs) {
     if (!existsSync(dir)) continue
+
+    // Add the parent directory itself as a workspace option
+    workspaces.push({
+      name: `${basename(dir)} (workspace)`,
+      path: dir,
+    })
 
     try {
       const entries = readdirSync(dir)
@@ -44,5 +52,11 @@ export function discoverProjects(): DiscoveredProject[] {
     }
   }
 
-  return projects.sort((a, b) => a.name.localeCompare(b.name))
+  // Full machine access first, then workspaces, then individual projects
+  const home = homedir()
+  return [
+    { name: `${basename(home)} (full access)`, path: home },
+    ...workspaces,
+    ...projects.sort((a, b) => a.name.localeCompare(b.name)),
+  ]
 }
