@@ -4,6 +4,7 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './tools/ToolCallBlock'
+import { extractUserMessageText } from '@/lib/messages/user-content'
 
 interface ChatMessageProps {
   message: SDKMessage
@@ -36,22 +37,11 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
     }
 
     case 'user': {
-      const content = message.message.content
-
-      // Skip tool_result messages entirely — they're shown inline with tool calls
-      if (Array.isArray(content)) {
-        const hasToolResult = content.some(
-          (block: unknown) => typeof block === 'object' && block !== null && 'type' in block && (block as { type: string }).type === 'tool_result'
-        )
-        if (hasToolResult) return null
-      }
-
-      const text = typeof content === 'string'
-        ? content
-        : JSON.stringify(content)
-
       // Skip replayed messages (they're context, not new conversation)
       if ('isReplay' in message && message.isReplay) return null
+
+      const text = extractUserMessageText(message.message.content)
+      if (text === null) return null
 
       return (
         <div className="flex gap-3 py-3">
