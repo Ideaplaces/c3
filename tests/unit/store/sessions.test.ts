@@ -14,6 +14,18 @@ vi.mock('fs', () => ({
   }),
   mkdirSync: vi.fn(),
   existsSync: vi.fn((path: string) => path in mockFs),
+  readdirSync: vi.fn(() => []),
+}))
+
+vi.mock('os', () => ({
+  homedir: vi.fn(() => '/home/testuser'),
+}))
+
+// Mock the claude-sessions scanner (getAllSessions uses it)
+vi.mock('@/lib/claude-sessions/scanner', () => ({
+  scanAllSessions: vi.fn(() => []),
+  findSession: vi.fn(() => undefined),
+  entryToSessionMeta: vi.fn(),
 }))
 
 // Import after mocks
@@ -32,6 +44,7 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
     updatedAt: '2025-01-01T00:00:00.000Z',
     turnCount: 0,
     totalCostUsd: 0,
+    firstPrompt: 'hello',
     lastPrompt: 'hello',
     ...overrides,
   }
@@ -39,7 +52,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
 
 describe('sessions store', () => {
   beforeEach(() => {
-    // Clear mock filesystem
     Object.keys(mockFs).forEach((key) => delete mockFs[key])
   })
 

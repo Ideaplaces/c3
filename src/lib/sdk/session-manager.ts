@@ -2,7 +2,9 @@ import { query, type Query, type SDKMessage, type Options } from '@anthropic-ai/
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { hostname } from 'os'
-import { createSession, updateSession } from '@/lib/store/sessions'
+import { createSession, updateSession, getSession } from '@/lib/store/sessions'
+import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
 
 interface ActiveSession {
@@ -19,7 +21,7 @@ interface StartSessionParams {
   model?: string
 }
 
-class SessionManager extends EventEmitter {
+export class SessionManager extends EventEmitter {
   private activeSessions = new Map<string, ActiveSession>()
   private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
 
@@ -33,6 +35,7 @@ class SessionManager extends EventEmitter {
     delete cleanEnv.CLAUDECODE
 
     const options: Options = {
+      sessionId,
       cwd: projectPath,
       abortController,
       includePartialMessages: true,
@@ -51,7 +54,7 @@ class SessionManager extends EventEmitter {
       options.permissionMode = 'default'
     }
 
-    // Create session metadata
+    // Track session in CCC overlay (for active session metadata)
     createSession({
       id: sessionId,
       projectPath,
@@ -64,21 +67,19 @@ class SessionManager extends EventEmitter {
       updatedAt: new Date().toISOString(),
       turnCount: 0,
       totalCostUsd: 0,
+      firstPrompt: prompt,
       lastPrompt: prompt,
     })
 
     const q = query({ prompt, options })
 
-    const activeSession: ActiveSession = {
+    this.activeSessions.set(sessionId, {
       id: sessionId,
       query: q,
       abortController,
       projectPath,
-    }
+    })
 
-    this.activeSessions.set(sessionId, activeSession)
-
-    // Process messages in background
     this.processMessages(sessionId, q)
 
     return sessionId
@@ -102,7 +103,12 @@ class SessionManager extends EventEmitter {
       return
     }
 
-    // Session is not active, start a new query with resume
+    // Session is not active. Resume using the session ID directly.
+    // CCC passes sessionId to the SDK on start, so they share the same ID.
+    // CLI sessions also use the SDK session ID as the session identifier.
+    const sessionMeta = getSession(sessionId)
+    const projectPath = sessionMeta?.projectPath || ''
+
     const abortController = new AbortController()
 
     const cleanEnv = { ...process.env }
@@ -115,6 +121,7 @@ class SessionManager extends EventEmitter {
       settingSources: ['project'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       env: cleanEnv,
+      ...(projectPath && { cwd: projectPath }),
     }
 
     const q = query({ prompt, options })
@@ -123,10 +130,29 @@ class SessionManager extends EventEmitter {
       id: sessionId,
       query: q,
       abortController,
-      projectPath: '',
+      projectPath,
     })
 
-    updateSession(sessionId, { status: 'running', lastPrompt: prompt })
+    // Create/update CCC overlay entry
+    if (sessionMeta) {
+      updateSession(sessionId, { status: 'running', lastPrompt: prompt })
+    } else {
+      createSession({
+        id: sessionId,
+        projectPath,
+        projectName: basename(projectPath || 'unknown'),
+        machineName: hostname(),
+        status: 'running',
+        permissionMode: '',
+        model: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        turnCount: 0,
+        totalCostUsd: 0,
+        firstPrompt: prompt,
+        lastPrompt: prompt,
+      })
+    }
 
     this.processMessages(sessionId, q)
   }
@@ -150,27 +176,51 @@ class SessionManager extends EventEmitter {
   }
 
   getBufferedEvents(sessionId: string): { sessionId: string; message: unknown }[] {
-    return this.eventBuffers.get(sessionId) || []
+    // Check in-memory buffer first (active/recent sessions)
+    const memoryBuffer = this.eventBuffers.get(sessionId)
+    if (memoryBuffer && memoryBuffer.length > 0) {
+      return memoryBuffer
+    }
+
+    // Fall back to Claude Code's native JSONL storage
+    const jsonlPath = getSessionJSONLPath(sessionId)
+    if (jsonlPath) {
+      const events = readSessionJSONL(jsonlPath)
+      if (events.length > 0) {
+        // Cache in memory for fast subsequent reads
+        this.eventBuffers.set(sessionId, events)
+        return events
+      }
+    }
+
+    return []
   }
 
   private async processMessages(sessionId: string, q: Query) {
-    // Initialize event buffer for this session
-    this.eventBuffers.set(sessionId, [])
+    // Initialize event buffer only if it doesn't exist (preserves history across resumes)
+    if (!this.eventBuffers.has(sessionId)) {
+      this.eventBuffers.set(sessionId, [])
+    }
 
     try {
       for await (const message of q) {
-        // Buffer the event for late subscribers
+        // Buffer the event in memory for late subscribers
+        const event = { sessionId, message }
         const buffer = this.eventBuffers.get(sessionId)
         if (buffer) {
-          buffer.push({ sessionId, message })
+          buffer.push(event)
         }
+        // SDK automatically persists to ~/.claude/projects/ JSONL
         this.emit('sdk_event', sessionId, message)
         this.handleMessageMetadata(sessionId, message)
       }
 
       // Generator completed normally
       this.activeSessions.delete(sessionId)
-      updateSession(sessionId, { status: 'idle' })
+      const currentSession = getSession(sessionId)
+      if (!currentSession || !['completed', 'error'].includes(currentSession.status)) {
+        updateSession(sessionId, { status: 'idle' })
+      }
       this.emit('session_ended', sessionId, 'completed')
     } catch (error) {
       this.activeSessions.delete(sessionId)

@@ -12,6 +12,7 @@ export interface SessionMeta {
   updatedAt: string
   turnCount: number
   totalCostUsd: number
+  firstPrompt: string
   lastPrompt: string
   errorMessage?: string
 }
