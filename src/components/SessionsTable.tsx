@@ -25,6 +25,13 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`
 }
 
+function truncate(text: string, max: number): string {
+  if (!text) return ''
+  const clean = text.replace(/\n/g, ' ').trim()
+  if (clean.length <= max) return clean
+  return clean.slice(0, max) + '...'
+}
+
 export function SessionsTable({ sessions }: { sessions: SessionMeta[] }) {
   if (sessions.length === 0) {
     return (
@@ -36,42 +43,42 @@ export function SessionsTable({ sessions }: { sessions: SessionMeta[] }) {
   }
 
   return (
-    <div className="table-container">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Project</th>
-            <th>Status</th>
-            <th>Last Prompt</th>
-            <th>Turns</th>
-            <th>Cost</th>
-            <th>Updated</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map((session) => (
-            <tr key={session.id}>
-              <td className="font-medium">{session.projectName}</td>
-              <td><StatusBadge status={session.status} /></td>
-              <td className="max-w-xs truncate text-foreground-muted text-sm font-mono">
-                {session.lastPrompt}
-              </td>
-              <td className="text-foreground-muted">{session.turnCount}</td>
-              <td className="text-foreground-muted">{formatCost(session.totalCostUsd)}</td>
-              <td className="text-foreground-muted text-sm">{formatTime(session.updatedAt)}</td>
-              <td>
-                <Link
-                  href={`/sessions/${session.id}`}
-                  className="btn btn-outline px-3 py-1 text-sm"
-                >
-                  {session.status === 'running' ? 'View' : 'Resume'}
-                </Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-2">
+      {sessions.map((session) => {
+        const prompt = session.firstPrompt || session.lastPrompt || ''
+
+        return (
+          <Link
+            key={session.id}
+            href={`/sessions/${session.id}`}
+            className="group block border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
+          >
+            <div className="flex items-start justify-between gap-4">
+              {/* Left: project + prompt */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-medium font-mono text-sm group-hover:text-primary transition-colors">{session.projectName}</span>
+                  <StatusBadge status={session.status} />
+                  <span className="text-foreground-muted/60 text-xs">{formatTime(session.updatedAt)}</span>
+                </div>
+
+                <div className="text-sm text-foreground">
+                  {truncate(prompt, 140)}
+                </div>
+              </div>
+
+              {/* Right: stats + arrow */}
+              <div className="flex items-center gap-4 shrink-0 text-xs text-foreground-muted pt-1">
+                {session.turnCount > 0 && (
+                  <span>{session.turnCount} turns</span>
+                )}
+                <span>{formatCost(session.totalCostUsd)}</span>
+                <span className="text-foreground-muted/40 group-hover:text-primary transition-colors">&rarr;</span>
+              </div>
+            </div>
+          </Link>
+        )
+      })}
     </div>
   )
 }
