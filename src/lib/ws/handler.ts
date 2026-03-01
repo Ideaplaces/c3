@@ -2,6 +2,8 @@ import type { WebSocket } from 'ws'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { UserPayload, ClientMessage, ServerMessage } from '@/types/ws'
 import { sessionManager } from '@/lib/sdk/session-manager'
+import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+import { readSessionTail, readSessionBefore } from '@/lib/claude-sessions/reader'
 
 const clientSessions = new Map<WebSocket, Set<string>>()
 
@@ -89,6 +91,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
         sessionManager.on('session_ended', onSessionEnded)
 
         await sessionManager.resumeSession(message.sessionId, message.prompt)
+        send(ws, { type: 'session_started', sessionId: message.sessionId })
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to send message' })
       }
@@ -100,15 +103,14 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
         const sessionId = message.sessionId
         console.log(`[WS] Subscribe request for session: ${sessionId}`)
 
-        // Replay buffered events
-        const buffered = sessionManager.getBufferedEvents(sessionId)
-        console.log(`[WS] Replaying ${buffered.length} buffered events for session ${sessionId}`)
-        for (const event of buffered) {
-          send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
-        }
-
-        // If session is still running, attach live event relay
         if (sessionManager.isSessionActive(sessionId)) {
+          // Active session: replay full in-memory buffer + attach live relay
+          const buffered = sessionManager.getBufferedEvents(sessionId)
+          console.log(`[WS] Replaying ${buffered.length} buffered events for active session ${sessionId}`)
+          for (const event of buffered) {
+            send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
+          }
+
           send(ws, { type: 'session_started', sessionId })
 
           const onSdkEvent = (sid: string, sdkMessage: unknown) => {
@@ -128,11 +130,39 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
           sessionManager.on('sdk_event', onSdkEvent)
           sessionManager.on('session_ended', onSessionEnded)
         } else {
-          // Session already ended
+          // Inactive session: read only the tail from disk for fast loading
+          const jsonlPath = getSessionJSONLPath(sessionId)
+          if (jsonlPath) {
+            const { events, cursor, hasMore } = readSessionTail(jsonlPath)
+            console.log(`[WS] Sending ${events.length} tail events for session ${sessionId} (cursor=${cursor}, hasMore=${hasMore})`)
+            for (const event of events) {
+              send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
+            }
+            send(ws, { type: 'history_batch', sessionId, messages: [], cursor, hasMore })
+          }
           send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
         }
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to subscribe' })
+      }
+      break
+    }
+
+    case 'load_previous': {
+      try {
+        const sessionId = message.sessionId
+        const cursor = message.cursor
+        const jsonlPath = getSessionJSONLPath(sessionId)
+        if (!jsonlPath) {
+          send(ws, { type: 'history_batch', sessionId, messages: [], cursor: 0, hasMore: false })
+          break
+        }
+        const result = readSessionBefore(jsonlPath, cursor)
+        console.log(`[WS] Sending ${result.events.length} previous events for session ${sessionId} (cursor=${result.cursor}, hasMore=${result.hasMore})`)
+        const sdkMessages = result.events.map((e) => e.message as SDKMessage)
+        send(ws, { type: 'history_batch', sessionId, messages: sdkMessages, cursor: result.cursor, hasMore: result.hasMore })
+      } catch (error) {
+        send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to load previous messages' })
       }
       break
     }

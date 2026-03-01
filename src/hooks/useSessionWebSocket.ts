@@ -87,6 +87,10 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
     sendMessage({ type: 'subscribe', sessionId: sid })
   }, [sendMessage])
 
+  const loadPrevious = useCallback((sid: string, cursor: number) => {
+    sendMessage({ type: 'load_previous', sessionId: sid, cursor })
+  }, [sendMessage])
+
   const disconnect = useCallback(() => {
     wsRef.current?.close()
     wsRef.current = null
@@ -108,6 +112,7 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
     sendPrompt,
     stopSession,
     subscribe,
+    loadPrevious,
     setMessages,
   }
 }

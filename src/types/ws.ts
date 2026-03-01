@@ -6,6 +6,7 @@ export type ClientMessage =
   | { type: 'send'; sessionId: string; prompt: string }
   | { type: 'stop'; sessionId: string }
   | { type: 'subscribe'; sessionId: string }
+  | { type: 'load_previous'; sessionId: string; cursor: number }
 
 // Server → Client messages
 export type ServerMessage =
@@ -14,6 +15,7 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   | { type: 'session_started'; sessionId: string }
   | { type: 'session_ended'; sessionId: string; reason: string }
+  | { type: 'history_batch'; sessionId: string; messages: SDKMessage[]; cursor: number; hasMore: boolean }
 
 export interface UserPayload {
   email: string
