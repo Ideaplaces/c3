@@ -343,6 +343,26 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     ws.loadPrevious(activeSessionId, historyCursor)
   }
 
+  // Auto-load previous messages when scrolling to the top
+  const loadTriggerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const trigger = loadTriggerRef.current
+    if (!trigger) return
+    if (!historyHasMore || historyLoading) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          handleLoadPrevious()
+        }
+      },
+      { root: containerRef.current, threshold: 0.1 }
+    )
+    observer.observe(trigger)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyHasMore, historyLoading, historyCursor, activeSessionId])
+
   // Detect project name from init message
   const initMessage = sdkMessages.find((m) => m.type === 'system' && 'subtype' in m && m.subtype === 'init')
   const displayProject = projectName || (initMessage && 'cwd' in initMessage ? String(initMessage.cwd).split('/').pop() : '')
@@ -418,20 +438,12 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           </div>
         ) : (
           <>
-            {/* Load previous messages button */}
+            {/* Auto-load trigger for previous messages */}
             {historyHasMore && (
-              <div className="flex justify-center py-2">
-                <button
-                  onClick={handleLoadPrevious}
-                  disabled={historyLoading}
-                  className="btn btn-outline px-4 py-1.5 text-xs disabled:opacity-50"
-                >
-                  {historyLoading ? (
-                    <span className="flex items-center gap-2"><Spinner /> Loading...</span>
-                  ) : (
-                    'Load previous messages'
-                  )}
-                </button>
+              <div ref={loadTriggerRef} className="flex justify-center py-2">
+                {historyLoading && (
+                  <span className="flex items-center gap-2 text-xs text-foreground-muted"><Spinner /> Loading previous messages...</span>
+                )}
               </div>
             )}
 
