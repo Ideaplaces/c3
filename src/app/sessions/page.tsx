@@ -9,14 +9,21 @@ import { NewSessionDialog } from '@/components/NewSessionDialog'
 export default function SessionsPage() {
   const router = useRouter()
   const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [user, setUser] = useState<{ email: string; name: string } | null>(null)
 
   const fetchSessions = useCallback(() => {
     fetch('/api/sessions')
       .then((r) => r.json())
-      .then((data) => setSessions(data.sessions))
-      .catch(console.error)
+      .then((data) => {
+        setSessions(data.sessions)
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error(err)
+        setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -75,7 +82,7 @@ export default function SessionsPage() {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        <SessionsTable sessions={sessions} />
+        <SessionsTable sessions={sessions} loading={loading} />
       </main>
 
       <NewSessionDialog
