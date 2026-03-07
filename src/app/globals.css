@@ -497,3 +497,23 @@ code {
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
+
+/* Touch device: always show copy button (no hover on mobile) */
+@media (hover: none) {
+  .group .group-hover\:opacity-100 {
+    opacity: 1;
+  }
+}
+
+/* Prevent horizontal overflow on small screens */
+@media (max-width: 640px) {
+  pre {
+    font-size: 0.8125rem;
+  }
+
+  .prose pre {
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+    border-radius: var(--radius-sm);
+  }
+}
