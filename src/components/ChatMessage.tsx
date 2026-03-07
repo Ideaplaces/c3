@@ -44,11 +44,11 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       if (text === null) return null
 
       return (
-        <div className="flex gap-3 py-3">
-          <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+        <div className="flex gap-2 sm:gap-3 py-3">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
             U
           </div>
-          <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5">
+          <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
             {text}
           </div>
         </div>
@@ -71,7 +71,7 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       // If this message is ONLY tool calls (no text), render compactly without the avatar
       if (!hasText && !hasThinking && hasTools) {
         return (
-          <div className="pl-10 space-y-1">
+          <div className="pl-0 sm:pl-10 space-y-1">
             {toolBlocks.map((block, i) => {
               const result = toolResults?.get(block.id)
               return (
@@ -90,11 +90,11 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       }
 
       return (
-        <div className="flex gap-3 py-2">
-          <div className="w-7 h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
+        <div className="flex gap-2 sm:gap-3 py-2">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
             C
           </div>
-          <div className="flex-1 space-y-2 min-w-0">
+          <div className="flex-1 space-y-2 min-w-0 break-words">
             {blocks.map((block, i) => {
               if (block.type === 'text' && block.text?.trim()) {
                 return <MarkdownRenderer key={i} content={block.text} />
