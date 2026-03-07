@@ -181,20 +181,20 @@ function ActivityGroup({ group, toolResults }: {
     <div className="border border-border/50 rounded-md overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface/50 transition-colors"
+        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors"
       >
-        <span className="text-xs text-foreground-muted select-none">{expanded ? '▼' : '▶'}</span>
-        <span className="text-xs text-foreground-muted">
-          {count} operation{count !== 1 ? 's' : ''}
+        <span className="text-xs text-foreground-muted select-none shrink-0">{expanded ? '▼' : '▶'}</span>
+        <span className="text-xs text-foreground-muted shrink-0">
+          {count} op{count !== 1 ? 's' : ''}
         </span>
         {!expanded && group.toolSummaries && group.toolSummaries.length > 0 && (
-          <span className="text-xs text-foreground-muted/60 truncate flex-1 font-mono">
+          <span className="text-xs text-foreground-muted/60 truncate flex-1 font-mono min-w-0">
             — {group.toolSummaries.slice(-3).join(', ')}
           </span>
         )}
       </button>
       {expanded && (
-        <div className="border-t border-border/50 px-2 py-1 space-y-0.5 max-h-[400px] overflow-y-auto">
+        <div className="border-t border-border/50 px-1 sm:px-2 py-1 space-y-0.5 max-h-[400px] overflow-y-auto">
           {group.messages.map((msg, i) => (
             <ChatMessage key={i} message={msg} toolResults={toolResults} />
           ))}
@@ -395,22 +395,22 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="border-b border-border px-4 py-2.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors text-sm">
-            &larr; Sessions
+      <header className="border-b border-border px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors text-sm shrink-0">
+            &larr;<span className="hidden sm:inline"> Sessions</span>
           </Link>
           {displayProject && (
-            <span className="font-medium font-mono text-sm">{displayProject}</span>
+            <span className="font-medium font-mono text-sm truncate">{displayProject}</span>
           )}
           {isRunning && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-info">
+            <span className="inline-flex items-center gap-1.5 text-xs text-info shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
-              Running
+              <span className="hidden sm:inline">Running</span>
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {isRunning && activeSessionId && (
             <button
               onClick={() => ws.stopSession(activeSessionId)}
@@ -423,7 +423,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
       </header>
 
       {/* Messages area */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 relative">
+      <div ref={containerRef} className="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-4 space-y-2 relative">
         {isLoading ? (
           <LoadingIndicator status={loadingStatus} />
         ) : sdkMessages.length === 0 && streamState.blocks.length === 0 && !isRunning ? (
@@ -461,11 +461,11 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
             {localUserMessages
               .filter((m) => m.idx >= sdkMessages.length)
               .map((m, i) => (
-                <div key={`local-${i}`} className="flex gap-3 py-3">
-                  <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                <div key={`local-${i}`} className="flex gap-2 sm:gap-3 py-3">
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
                     U
                   </div>
-                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5">
+                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
                     {m.text}
                   </div>
                 </div>
@@ -473,11 +473,11 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
 
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (
-              <div className="flex gap-3 py-2">
-                <div className="w-7 h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
+              <div className="flex gap-2 sm:gap-3 py-2">
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
                   C
                 </div>
-                <div className="flex-1 space-y-1 min-w-0">
+                <div className="flex-1 space-y-1 min-w-0 break-words">
                   {streamState.blocks.map((block, i) => (
                     <StreamingBlock key={i} block={block} />
                   ))}
@@ -497,24 +497,26 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
 
         {/* Scroll to bottom button */}
         {showScrollButton && (
-          <button
-            onClick={scrollToBottom}
-            className="sticky bottom-4 left-1/2 -translate-x-1/2 btn btn-outline px-3 py-1.5 text-xs shadow-lg bg-background"
-          >
-            &darr; Scroll to bottom
-          </button>
+          <div className="sticky bottom-3 flex justify-center pointer-events-none">
+            <button
+              onClick={scrollToBottom}
+              className="pointer-events-auto btn btn-outline px-3 py-1.5 text-xs shadow-lg bg-background border-border-light"
+            >
+              &darr; Scroll to bottom
+            </button>
+          </div>
         )}
       </div>
 
       {/* Input area */}
-      <div className="border-t border-border px-4 py-3 shrink-0">
+      <div className="border-t border-border px-2 sm:px-4 py-2 sm:py-3 shrink-0">
         <div className="flex gap-2 max-w-4xl mx-auto">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isRunning ? 'Wait for response to complete...' : 'Send a follow-up prompt...'}
+            placeholder={isRunning ? 'Wait for response...' : 'Send a follow-up prompt...'}
             disabled={!activeSessionId || isRunning}
             rows={1}
             className="flex-1 bg-surface border border-border rounded-md px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none resize-none disabled:opacity-50"
@@ -522,7 +524,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           <button
             onClick={handleSend}
             disabled={!input.trim() || !activeSessionId || isRunning}
-            className="btn btn-primary px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn btn-primary px-3 sm:px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
           >
             Send
           </button>
