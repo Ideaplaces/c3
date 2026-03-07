@@ -55,9 +55,20 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="card p-6 w-full max-w-lg">
-        <h2 className="text-xl font-bold font-heading mb-4">New Session</h2>
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 sm:p-4">
+      <div className="card p-4 sm:p-6 w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold font-heading">New Session</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="sm:hidden text-foreground-muted hover:text-foreground p-1"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -67,7 +78,7 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full bg-surface border border-border rounded-md px-3 py-2 text-foreground focus:border-primary focus:outline-none"
+              className="w-full bg-surface border border-border rounded-md px-3 py-2.5 text-foreground focus:border-primary focus:outline-none"
             >
               {projects.map((p) => (
                 <option key={p.path} value={p.path}>{p.name}</option>
@@ -79,7 +90,7 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
             <label className="block text-sm font-medium text-foreground-muted mb-1">
               Permission Mode
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {[
                 { value: 'bypassPermissions', label: 'Bypass' },
                 { value: 'acceptEdits', label: 'Accept Edits' },
@@ -108,7 +119,7 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-surface border border-border rounded-md px-3 py-2 text-foreground focus:border-primary focus:outline-none"
+              className="w-full bg-surface border border-border rounded-md px-3 py-2.5 text-foreground focus:border-primary focus:outline-none"
             >
               <option value="">Default (Sonnet)</option>
               <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
@@ -135,14 +146,14 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
             <button
               type="button"
               onClick={onClose}
-              className="btn btn-outline px-4 py-2"
+              className="btn btn-outline px-4 py-2 hidden sm:inline-flex"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!selectedProject || !prompt.trim() || loading}
-              className="btn btn-primary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary px-4 py-2.5 w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Starting...' : 'Start Session'}
             </button>
