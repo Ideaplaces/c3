@@ -14,8 +14,8 @@ function LoginContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="card p-8 w-full max-w-md text-center">
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="card p-6 sm:p-8 w-full max-w-md text-center">
         <h1 className="text-3xl font-bold mb-2 font-heading">
           <span className="text-gradient">Cloud Claude Code</span>
         </h1>
