@@ -65,24 +65,24 @@ export function SessionsTable({ sessions, loading }: { sessions: SessionMeta[]; 
           <Link
             key={session.id}
             href={`/sessions/${session.id}`}
-            className="group block border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
+            className="group block border border-border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-2 sm:gap-4">
               {/* Left: project + prompt */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium font-mono text-sm group-hover:text-primary transition-colors">{session.projectName}</span>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-medium font-mono text-sm group-hover:text-primary transition-colors truncate max-w-[200px] sm:max-w-none">{session.projectName}</span>
                   <StatusBadge status={session.status} />
                   <span className="text-foreground-muted/60 text-xs">{formatTime(session.updatedAt)}</span>
                 </div>
 
-                <div className="text-sm text-foreground">
+                <div className="text-sm text-foreground line-clamp-2 sm:line-clamp-1">
                   {truncate(prompt, 140)}
                 </div>
               </div>
 
               {/* Right: stats + arrow */}
-              <div className="flex items-center gap-4 shrink-0 text-xs text-foreground-muted pt-1">
+              <div className="hidden sm:flex items-center gap-4 shrink-0 text-xs text-foreground-muted pt-1">
                 {session.turnCount > 0 && (
                   <span>{session.turnCount} turns</span>
                 )}
