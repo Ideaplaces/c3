@@ -68,20 +68,20 @@ export function ToolCallBlock({ toolName, toolId, input, output, isError }: Tool
     <div className={`border rounded-md overflow-hidden ${isError ? 'border-error/30' : 'border-border'}`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-surface/50 transition-colors"
+        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors"
         data-tool-id={toolId}
       >
-        <span className="text-xs select-none">{expanded ? '\u25BC' : '\u25B6'}</span>
-        <span className="text-sm font-mono truncate flex-1">
+        <span className="text-xs select-none shrink-0">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span className="text-xs sm:text-sm font-mono truncate flex-1 min-w-0">
           <span className="select-none">{icon}</span>
           {summary}
         </span>
         {isError && (
-          <span className="badge badge-error text-[10px] px-1.5 py-0.5">error</span>
+          <span className="badge badge-error text-[10px] px-1.5 py-0.5 shrink-0">error</span>
         )}
       </button>
       {expanded && (
-        <div className="px-3 pb-3 border-t border-border pt-2">
+        <div className="px-2 sm:px-3 pb-3 border-t border-border pt-2 overflow-x-auto">
           {renderToolContent()}
         </div>
       )}

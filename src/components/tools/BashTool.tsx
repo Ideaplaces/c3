@@ -15,9 +15,9 @@ export function BashTool({ input, output }: BashToolProps) {
         <div className="text-xs text-foreground-muted">{description}</div>
       )}
       <div className="bg-surface rounded-md border border-border overflow-hidden">
-        <div className="px-3 py-2 font-mono text-sm text-accent">
+        <div className="px-3 py-2 font-mono text-xs sm:text-sm text-accent overflow-x-auto">
           <span className="text-foreground-muted select-none">$ </span>
-          {command}
+          <span className="whitespace-pre-wrap break-all">{command}</span>
         </div>
         {output && (
           <div className="border-t border-border px-3 py-2 font-mono text-xs text-foreground-muted max-h-[300px] overflow-y-auto whitespace-pre-wrap">

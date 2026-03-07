@@ -11,7 +11,7 @@ export function DiffView({ oldText, newText }: DiffViewProps) {
   const newLines = newText.split('\n')
 
   return (
-    <div className="font-mono text-xs overflow-x-auto bg-surface rounded-md border border-border">
+    <div className="font-mono text-xs overflow-x-auto bg-surface rounded-md border border-border max-h-[400px] overflow-y-auto">
       {oldLines.length > 0 && oldText && (
         <div>
           {oldLines.map((line, i) => (
