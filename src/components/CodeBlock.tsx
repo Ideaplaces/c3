@@ -16,8 +16,8 @@ export function CodeBlock({ code, language, fileName, maxHeight = '400px' }: Cod
   useEffect(() => {
     let cancelled = false
 
-    // Lazy-load shiki
-    import('shiki').then(async ({ createHighlighter }) => {
+    // Lazy-load shiki (use bundle/web to avoid broken dynamic chunk imports in Next.js dev)
+    import('shiki/bundle/web').then(async ({ createHighlighter }) => {
       if (cancelled) return
       try {
         const highlighter = await createHighlighter({
