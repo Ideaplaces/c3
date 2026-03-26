@@ -11,8 +11,13 @@ export interface ChannelTrigger {
   maxTurns?: number
 }
 
+export interface SlackTrigger extends ChannelTrigger {
+  slackBotToken?: string
+}
+
 interface TriggersConfig {
   channels: Record<string, ChannelTrigger>
+  slack?: Record<string, SlackTrigger>
 }
 
 const TRIGGERS_PATH = path.join(process.cwd(), 'triggers.json')
@@ -32,7 +37,7 @@ export function loadTriggersConfig(): TriggersConfig {
     cachedMtime = stat.mtimeMs
     return cachedConfig
   } catch {
-    return { channels: {} }
+    return { channels: {}, slack: {} }
   }
 }
 
@@ -44,6 +49,23 @@ export function getChannelTrigger(channelId: string): ChannelTrigger | null {
     }
   }
   return null
+}
+
+export function getSlackTrigger(channelId: string): SlackTrigger | null {
+  const config = loadTriggersConfig()
+  if (!config.slack) return null
+  for (const trigger of Object.values(config.slack)) {
+    if (trigger.channelId === channelId) {
+      return trigger
+    }
+  }
+  return null
+}
+
+export function getAllSlackTriggers(): SlackTrigger[] {
+  const config = loadTriggersConfig()
+  if (!config.slack) return []
+  return Object.values(config.slack)
 }
 
 export function loadPromptTemplate(
