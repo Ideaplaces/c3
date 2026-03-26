@@ -31,8 +31,10 @@ export class SessionManager extends EventEmitter {
     const abortController = new AbortController()
 
     // Strip CLAUDECODE env var to allow nested SDK sessions
+    // Strip ANTHROPIC_API_KEY to force Claude Max subscription (fixed cost)
     const cleanEnv = { ...process.env }
     delete cleanEnv.CLAUDECODE
+    delete cleanEnv.ANTHROPIC_API_KEY
 
     const options: Options = {
       sessionId,
@@ -113,6 +115,7 @@ export class SessionManager extends EventEmitter {
 
     const cleanEnv = { ...process.env }
     delete cleanEnv.CLAUDECODE
+    delete cleanEnv.ANTHROPIC_API_KEY
 
     const options: Options = {
       resume: sessionId,
