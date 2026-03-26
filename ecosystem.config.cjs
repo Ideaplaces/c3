@@ -33,5 +33,21 @@ module.exports = {
       merge_logs: true,
       time: true,
     },
+    {
+      name: 'ccc-slack-poller',
+      script: 'npx',
+      args: 'tsx slack-poller.ts',
+      cwd: __dirname,
+      env: {
+        NODE_ENV: 'production',
+        CCC_URL: 'http://localhost:8347',
+      },
+      watch: false,
+      max_memory_restart: '200M',
+      error_file: '/home/chipdev/.ccc/logs/slack-error.log',
+      out_file: '/home/chipdev/.ccc/logs/slack-out.log',
+      merge_logs: true,
+      time: true,
+    },
   ],
 }

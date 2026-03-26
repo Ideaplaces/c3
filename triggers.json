@@ -8,5 +8,16 @@
       "permissionMode": "bypassPermissions",
       "model": "claude-sonnet-4-6"
     }
+  },
+  "slack": {
+    "alerts-backend-prod": {
+      "name": "alerts-backend-prod",
+      "channelId": "C0AFVBX1BEY",
+      "prompt": "mentorly-prod-error.md",
+      "projectPath": "/home/chipdev/mentorly-meta",
+      "permissionMode": "bypassPermissions",
+      "model": "claude-sonnet-4-6",
+      "pollIntervalMs": 15000
+    }
   }
 }
