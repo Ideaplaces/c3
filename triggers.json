@@ -1,0 +1,12 @@
+{
+  "channels": {
+    "agent-test": {
+      "name": "agent-test",
+      "channelId": "1486570098410913813",
+      "prompt": "test-echo.md",
+      "projectPath": "/home/chipdev/ideaplaces-meta",
+      "permissionMode": "bypassPermissions",
+      "model": "claude-sonnet-4-6"
+    }
+  }
+}
