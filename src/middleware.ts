@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/api/auth/']
+const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/webhooks/']
 const isDev = process.env.NODE_ENV !== 'production'
 
 export function middleware(request: NextRequest) {
