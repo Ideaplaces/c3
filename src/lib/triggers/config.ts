@@ -24,21 +24,13 @@ const HOME = process.env.HOME || '/tmp'
 
 // Config resolution order:
 // 1. C3_CONFIG_DIR env var (explicit override)
-// 2. Sibling c3-data/ directory (user symlinks this to their config repo)
-// 3. ~/.c3/ (fallback)
-// 4. CWD (development)
+// 2. ~/.c3/ (standard location, like ~/.claude/)
+// 3. CWD (development)
 function resolveConfigDir(): string {
   if (process.env.C3_CONFIG_DIR) {
     return process.env.C3_CONFIG_DIR
   }
-  // Check for sibling c3-data/ directory
-  // Users symlink this to their own config repo (e.g., c3-chip, c3-luca)
-  const parentDir = path.dirname(process.cwd())
-  const siblingPath = path.join(parentDir, 'c3-data')
-  if (fs.existsSync(path.join(siblingPath, 'triggers.json'))) {
-    return siblingPath
-  }
-  // Fallback to ~/.c3/
+  // Standard location: ~/.c3/
   const c3Dir = path.join(HOME, '.c3')
   if (fs.existsSync(path.join(c3Dir, 'triggers.json'))) {
     return c3Dir

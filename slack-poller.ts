@@ -41,9 +41,7 @@ function findTriggersJson(): string {
   if (process.env.C3_CONFIG_DIR) {
     return path.join(process.env.C3_CONFIG_DIR, 'triggers.json')
   }
-  const parentDir = path.dirname(process.cwd())
   const candidates = [
-    path.join(parentDir, 'c3-data', 'triggers.json'),
     path.join(home, '.c3', 'triggers.json'),
     path.join(process.cwd(), 'triggers.json'),
   ]
