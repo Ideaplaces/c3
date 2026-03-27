@@ -21,17 +21,35 @@ interface TriggersConfig {
 }
 
 const HOME = process.env.HOME || '/tmp'
-const CCC_DIR = path.join(HOME, '.ccc')
 
-// Config lives in ~/.ccc/ (private, per-machine)
-// Falls back to CWD for development / backward compatibility
-const TRIGGERS_PATH = fs.existsSync(path.join(CCC_DIR, 'triggers.json'))
-  ? path.join(CCC_DIR, 'triggers.json')
-  : path.join(process.cwd(), 'triggers.json')
+// Config resolution order:
+// 1. C3_CONFIG_DIR env var (explicit override)
+// 2. Sibling c3-data/ directory (user symlinks this to their config repo)
+// 3. ~/.c3/ (fallback)
+// 4. CWD (development)
+function resolveConfigDir(): string {
+  if (process.env.C3_CONFIG_DIR) {
+    return process.env.C3_CONFIG_DIR
+  }
+  // Check for sibling c3-data/ directory
+  // Users symlink this to their own config repo (e.g., c3-chip, c3-luca)
+  const parentDir = path.dirname(process.cwd())
+  const siblingPath = path.join(parentDir, 'c3-data')
+  if (fs.existsSync(path.join(siblingPath, 'triggers.json'))) {
+    return siblingPath
+  }
+  // Fallback to ~/.c3/
+  const c3Dir = path.join(HOME, '.c3')
+  if (fs.existsSync(path.join(c3Dir, 'triggers.json'))) {
+    return c3Dir
+  }
+  // Development fallback
+  return process.cwd()
+}
 
-const PROMPTS_DIR = fs.existsSync(path.join(CCC_DIR, 'prompts'))
-  ? path.join(CCC_DIR, 'prompts')
-  : path.join(process.cwd(), 'prompts')
+const CONFIG_DIR = resolveConfigDir()
+const TRIGGERS_PATH = path.join(CONFIG_DIR, 'triggers.json')
+const PROMPTS_DIR = path.join(CONFIG_DIR, 'prompts')
 
 let cachedConfig: TriggersConfig | null = null
 let cachedMtime: number = 0

@@ -36,9 +36,28 @@ interface TriggersConfig {
   slack?: Record<string, SlackTrigger>
 }
 
+function findTriggersJson(): string {
+  const home = process.env.HOME || '/tmp'
+  if (process.env.C3_CONFIG_DIR) {
+    return path.join(process.env.C3_CONFIG_DIR, 'triggers.json')
+  }
+  const parentDir = path.dirname(process.cwd())
+  const candidates = [
+    path.join(parentDir, 'c3-data', 'triggers.json'),
+    path.join(home, '.c3', 'triggers.json'),
+    path.join(process.cwd(), 'triggers.json'),
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p
+  }
+  return path.join(process.cwd(), 'triggers.json')
+}
+
 function loadTriggers(): TriggersConfig {
   try {
-    return JSON.parse(fs.readFileSync(path.join(process.cwd(), 'triggers.json'), 'utf-8'))
+    const triggersPath = findTriggersJson()
+    console.log(`[Slack Poller] Loading config from ${triggersPath}`)
+    return JSON.parse(fs.readFileSync(triggersPath, 'utf-8'))
   } catch {
     return { slack: {} }
   }
