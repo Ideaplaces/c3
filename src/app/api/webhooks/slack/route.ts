@@ -52,10 +52,14 @@ export async function POST(request: Request) {
       const summary = extractSummary(sessionId, reason)
       const baseUrl = process.env.CCC_PUBLIC_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8347'
 
+      const slackSummary = markdownToSlack(
+        summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
+      )
+
       const slackMessage = [
         `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
         '',
-        summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary,
+        slackSummary,
         '',
         `*Continue this conversation:*`,
         `Terminal: \`claude --resume ${sessionId}\``,
@@ -116,4 +120,18 @@ function extractSummary(sessionId: string, reason: string): string {
   }
 
   return `Session completed (${reason})`
+}
+
+/**
+ * Convert GitHub-flavored markdown to Slack mrkdwn.
+ * Slack uses *bold*, _italic_, and `code` but NOT **bold** or [links](url).
+ */
+function markdownToSlack(text: string): string {
+  return text
+    // **bold** → *bold* (must do double-star before single-star)
+    .replace(/\*\*(.+?)\*\*/g, '*$1*')
+    // [text](url) → <url|text>
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>')
+    // ### Headings → *Headings* (bold)
+    .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
 }
