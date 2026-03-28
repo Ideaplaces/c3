@@ -159,16 +159,14 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     return
   }
 
-  // Identify our own bot so we never process our own replies
-  // This is the primary loop prevention: we NEVER investigate our own messages
-  const OUR_BOT_ID = process.env.C3_SLACK_BOT_ID || ''
-
-  // Filter: only top-level messages we didn't post
+  // Filter: only top-level messages (thread replies are invisible to the poller)
+  // Loop prevention relies on two things:
+  // 1. 👀 reaction check (below) skips already-processed messages
+  // 2. C3 replies go in-thread with reply_broadcast:false, so they never appear here
   const candidates = (data.messages || [])
     .filter(m => !m.subtype || m.subtype === 'bot_message')
     .filter(m => m.ts !== oldest)
     .filter(m => !m.thread_ts || m.thread_ts === m.ts) // only top-level
-    .filter(m => !OUR_BOT_ID || m.bot_id !== OUR_BOT_ID) // never process our own
     .sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts))
 
   if (candidates.length === 0) return
