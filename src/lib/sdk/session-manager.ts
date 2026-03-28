@@ -32,9 +32,13 @@ export class SessionManager extends EventEmitter {
 
     // Strip CLAUDECODE env var to allow nested SDK sessions
     // Strip ANTHROPIC_API_KEY to force Claude Max subscription (fixed cost)
+    // Strip SLACK_BOT_TOKEN to prevent agents from posting to Slack directly
+    // Strip DISCORD_BOT_TOKEN to prevent agents from posting to Discord directly
     const cleanEnv = { ...process.env }
     delete cleanEnv.CLAUDECODE
     delete cleanEnv.ANTHROPIC_API_KEY
+    delete cleanEnv.SLACK_BOT_TOKEN
+    delete cleanEnv.DISCORD_BOT_TOKEN
 
     const options: Options = {
       sessionId,
@@ -116,6 +120,8 @@ export class SessionManager extends EventEmitter {
     const cleanEnv = { ...process.env }
     delete cleanEnv.CLAUDECODE
     delete cleanEnv.ANTHROPIC_API_KEY
+    delete cleanEnv.SLACK_BOT_TOKEN
+    delete cleanEnv.DISCORD_BOT_TOKEN
 
     const options: Options = {
       resume: sessionId,

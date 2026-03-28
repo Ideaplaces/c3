@@ -93,6 +93,7 @@ interface SlackMessage {
   ts: string
   thread_ts?: string
   subtype?: string
+  reactions?: { name: string; users: string[] }[]
 }
 
 interface SlackHistoryResponse {
@@ -104,6 +105,38 @@ interface SlackHistoryResponse {
 interface SlackUserResponse {
   ok: boolean
   user?: { real_name?: string; name?: string }
+}
+
+interface SlackApiResponse {
+  ok: boolean
+  error?: string
+}
+
+const PROCESSED_REACTION = 'eyes'
+
+async function hasBeenProcessed(token: string, channelId: string, ts: string): Promise<boolean> {
+  const res = await fetch(
+    `https://slack.com/api/reactions.get?channel=${channelId}&timestamp=${ts}`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  )
+  const data = await res.json() as { ok: boolean; message?: { reactions?: { name: string }[] } }
+  if (!data.ok || !data.message?.reactions) return false
+  return data.message.reactions.some(r => r.name === PROCESSED_REACTION)
+}
+
+async function markAsProcessed(token: string, channelId: string, ts: string): Promise<void> {
+  const res = await fetch('https://slack.com/api/reactions.add', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ channel: channelId, timestamp: ts, name: PROCESSED_REACTION }),
+  })
+  const data = await res.json() as SlackApiResponse
+  if (!data.ok && data.error !== 'already_reacted') {
+    console.error(`[Slack Poller] Failed to add reaction: ${data.error}`)
+  }
 }
 
 async function pollChannel(trigger: SlackTrigger, state: PollerState) {
@@ -126,22 +159,35 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     return
   }
 
-  // Filter messages:
-  // - Include regular messages and bot alerts (monitoring systems post as bots)
-  // - Exclude our own bot's replies (they contain "Agent Investigation Complete")
-  // - Exclude thread replies (thread_ts !== ts means it's a reply, not a top-level message)
-  const messages = (data.messages || [])
+  // Identify our own bot so we never process our own replies
+  // This is the primary loop prevention: we NEVER investigate our own messages
+  const OUR_BOT_ID = process.env.C3_SLACK_BOT_ID || ''
+
+  // Filter: only top-level messages we didn't post
+  const candidates = (data.messages || [])
     .filter(m => !m.subtype || m.subtype === 'bot_message')
     .filter(m => m.ts !== oldest)
-    .filter(m => !m.thread_ts || m.thread_ts === m.ts) // only top-level messages
-    .filter(m => !m.text?.includes('Agent Investigation Complete')) // ignore our own replies
+    .filter(m => !m.thread_ts || m.thread_ts === m.ts) // only top-level
+    .filter(m => !OUR_BOT_ID || m.bot_id !== OUR_BOT_ID) // never process our own
     .sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts))
 
-  if (messages.length === 0) return
+  if (candidates.length === 0) return
 
-  console.log(`[Slack Poller] ${messages.length} new message(s) in #${trigger.name}`)
+  for (const msg of candidates) {
+    // Update last seen timestamp regardless of whether we process it
+    state.lastTs[trigger.channelId] = msg.ts
+    saveState(state)
 
-  for (const msg of messages) {
+    // Check if already processed (has 👀 reaction)
+    const alreadyProcessed = await hasBeenProcessed(token, trigger.channelId, msg.ts)
+    if (alreadyProcessed) {
+      console.log(`[Slack Poller] Skipping already-processed message ${msg.ts}`)
+      continue
+    }
+
+    // Mark as processed IMMEDIATELY (before forwarding) to prevent re-processing
+    await markAsProcessed(token, trigger.channelId, msg.ts)
+
     // Get author name
     let author = 'bot'
     if (msg.user) {
@@ -158,9 +204,9 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       }
     }
 
-    console.log(`[Slack Poller] Forwarding message from ${author}: ${msg.text.slice(0, 100)}...`)
+    console.log(`[Slack Poller] Processing message from ${author}: ${msg.text.slice(0, 100)}...`)
 
-    // Forward to CCC webhook
+    // Forward to C3 webhook
     try {
       const webhookRes = await fetch(`${CCC_URL}/api/webhooks/slack`, {
         method: 'POST',
@@ -184,17 +230,35 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
         console.error(`[Slack Poller] Webhook error:`, result.error)
       }
     } catch (err) {
-      console.error(`[Slack Poller] Error calling CCC:`, err)
+      console.error(`[Slack Poller] Error calling C3:`, err)
     }
+  }
+}
 
-    // Update last seen timestamp
-    state.lastTs[trigger.channelId] = msg.ts
-    saveState(state)
+// Detect our own bot ID at startup so we never process our own messages
+async function detectOurBotId(): Promise<void> {
+  if (process.env.C3_SLACK_BOT_ID) return
+  const token = DEFAULT_SLACK_TOKEN
+  if (!token) return
+  try {
+    const res = await fetch('https://slack.com/api/auth.test', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    const data = await res.json() as { ok: boolean; bot_id?: string }
+    if (data.ok && data.bot_id) {
+      // This is the monitoring bot. We need the C3 reply bot ID.
+      // The reply bot is different - it's set via DISCORD_BOT_TOKEN's Slack equivalent.
+      // For now, rely on C3_SLACK_BOT_ID env var.
+      console.log(`[Slack Poller] Slack auth bot_id: ${data.bot_id}`)
+    }
+  } catch {
+    // ignore
   }
 }
 
 // Main loop
 async function main() {
+  await detectOurBotId()
   const triggers = loadTriggers()
   const slackTriggers = Object.values(triggers.slack || {})
 

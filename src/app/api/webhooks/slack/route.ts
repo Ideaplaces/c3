@@ -60,7 +60,8 @@ export async function POST(request: Request) {
         `View full session: ${baseUrl}/sessions/${sessionId}`,
       ].join('\n')
 
-      // Reply in thread
+      // Reply in thread (thread_ts = original message timestamp)
+      console.log(`[Slack Webhook] Replying in thread: channel=${channelId} thread_ts=${messageTs}`)
       fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           channel: channelId,
           thread_ts: messageTs,
+          reply_broadcast: false,
           text: slackMessage,
           unfurl_links: false,
         }),
@@ -77,9 +79,9 @@ export async function POST(request: Request) {
         .then(res => res.json())
         .then((data: Record<string, unknown>) => {
           if (data.ok) {
-            console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId}`)
+            console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId} (thread_ts=${messageTs})`)
           } else {
-            console.error(`[Slack Webhook] Slack reply failed:`, data.error)
+            console.error(`[Slack Webhook] Slack reply failed:`, data.error, `thread_ts=${messageTs}`)
           }
         })
         .catch(err => console.error(`[Slack Webhook] Slack reply error:`, err))
