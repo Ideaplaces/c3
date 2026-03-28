@@ -1,11 +1,10 @@
 import { signToken } from '@/lib/auth/jwt'
 import { Resend } from 'resend'
+import { headers } from 'next/headers'
 
 const ALLOWED_EMAILS = (process.env.CCC_ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase())
-const BASE_URL = process.env.C3_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://c3.ideaplaces.com'
 
 export async function POST() {
-  // Auto-send to the first allowed email. No input needed.
   const email = ALLOWED_EMAILS[0]
   if (!email) {
     return Response.json({ error: 'No allowed email configured' }, { status: 500 })
@@ -16,8 +15,14 @@ export async function POST() {
     return Response.json({ error: 'Email not configured' }, { status: 500 })
   }
 
+  // Build base URL from request headers (works behind Cloudflare tunnel)
+  const headersList = await headers()
+  const host = headersList.get('host') || 'c3.ideaplaces.com'
+  const proto = headersList.get('x-forwarded-proto') || 'https'
+  const baseUrl = `${proto}://${host}`
+
   const token = signToken({ email, name: email.split('@')[0], avatarUrl: null })
-  const magicUrl = `${BASE_URL}/api/auth/magic-link/verify?token=${token}`
+  const magicUrl = `${baseUrl}/api/auth/magic-link/verify?token=${token}`
 
   const resend = new Resend(apiKey)
   await resend.emails.send({
