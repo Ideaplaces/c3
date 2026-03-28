@@ -86,15 +86,12 @@ function saveState(state: PollerState) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
 }
 
-interface SlackMessage {
-  text: string
-  user?: string
-  bot_id?: string
-  ts: string
-  thread_ts?: string
-  subtype?: string
-  reactions?: { name: string; users: string[] }[]
-}
+import {
+  filterCandidates,
+  shouldProcessMessage,
+  PROCESSED_REACTION,
+  type SlackMessage,
+} from './src/lib/slack-poller/logic.js'
 
 interface SlackHistoryResponse {
   ok: boolean
@@ -112,10 +109,7 @@ interface SlackApiResponse {
   error?: string
 }
 
-const PROCESSED_REACTION = 'eyes'
-
-// Rate limiting: max 1 session per channel per 5 minutes
-const COOLDOWN_MS = 5 * 60 * 1000
+// Rate limiting state (in-memory, resets on restart)
 const lastSessionTime = new Map<string, number>()
 
 async function hasBeenProcessed(token: string, channelId: string, ts: string): Promise<boolean> {
@@ -163,15 +157,8 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     return
   }
 
-  // Filter: only top-level messages (thread replies are invisible to the poller)
-  // Loop prevention relies on two things:
-  // 1. 👀 reaction check (below) skips already-processed messages
-  // 2. C3 replies go in-thread with reply_broadcast:false, so they never appear here
-  const candidates = (data.messages || [])
-    .filter(m => !m.subtype || m.subtype === 'bot_message')
-    .filter(m => m.ts !== oldest)
-    .filter(m => !m.thread_ts || m.thread_ts === m.ts) // only top-level
-    .sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts))
+  // Filter candidates using tested logic
+  const candidates = filterCandidates(data.messages || [], oldest)
 
   if (candidates.length === 0) return
 
@@ -180,10 +167,17 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     state.lastTs[trigger.channelId] = msg.ts
     saveState(state)
 
-    // Check if already processed (has 👀 reaction)
+    // Check if already processed via Slack API (reaction check)
     const alreadyProcessed = await hasBeenProcessed(token, trigger.channelId, msg.ts)
     if (alreadyProcessed) {
       console.log(`[Slack Poller] Skipping already-processed message ${msg.ts}`)
+      continue
+    }
+
+    // Check rate limit (uses tested shouldProcessMessage logic)
+    const decision = shouldProcessMessage(msg, trigger.channelId, lastSessionTime)
+    if (!decision.process) {
+      console.log(`[Slack Poller] Skipping message ${msg.ts}: ${decision.reason}`)
       continue
     }
 
@@ -204,15 +198,6 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       } catch {
         author = msg.user
       }
-    }
-
-    // Rate limit: max 1 session per channel per 5 minutes
-    const lastTime = lastSessionTime.get(trigger.channelId) || 0
-    const now = Date.now()
-    if (now - lastTime < COOLDOWN_MS) {
-      const waitSec = Math.round((COOLDOWN_MS - (now - lastTime)) / 1000)
-      console.log(`[Slack Poller] Rate limited: channel ${trigger.channelId} cooldown (${waitSec}s remaining). Skipping.`)
-      continue
     }
 
     console.log(`[Slack Poller] Processing message from ${author}: ${msg.text.slice(0, 100)}...`)
