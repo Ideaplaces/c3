@@ -2,13 +2,13 @@ import { signToken } from '@/lib/auth/jwt'
 import { Resend } from 'resend'
 
 const ALLOWED_EMAILS = (process.env.CCC_ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase())
+const BASE_URL = process.env.C3_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://c3.ideaplaces.com'
 
-export async function POST(request: Request) {
-  const { email } = await request.json()
-
-  if (!email || !ALLOWED_EMAILS.includes(email.toLowerCase())) {
-    // Don't reveal whether the email is valid
-    return Response.json({ ok: true })
+export async function POST() {
+  // Auto-send to the first allowed email. No input needed.
+  const email = ALLOWED_EMAILS[0]
+  if (!email) {
+    return Response.json({ error: 'No allowed email configured' }, { status: 500 })
   }
 
   const apiKey = process.env.RESEND_API_KEY
@@ -16,10 +16,8 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Email not configured' }, { status: 500 })
   }
 
-  // Create a short-lived token (15 min) for the magic link
   const token = signToken({ email, name: email.split('@')[0], avatarUrl: null })
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8347'
-  const magicUrl = `${baseUrl}/api/auth/magic-link/verify?token=${token}`
+  const magicUrl = `${BASE_URL}/api/auth/magic-link/verify?token=${token}`
 
   const resend = new Resend(apiKey)
   await resend.emails.send({
@@ -36,5 +34,5 @@ export async function POST(request: Request) {
     `,
   })
 
-  return Response.json({ ok: true })
+  return Response.json({ ok: true, email })
 }

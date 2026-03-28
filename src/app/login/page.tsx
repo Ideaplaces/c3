@@ -1,38 +1,32 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useState } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 
 function LoginContent() {
   const searchParams = useSearchParams()
-  const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
+  const [email, setEmail] = useState('')
   const [error, setError] = useState(searchParams.get('error') || '')
-  const [loading, setLoading] = useState(false)
 
   const errorMessages: Record<string, string> = {
-    expired: 'Link expired. Request a new one.',
-    missing_token: 'Invalid link. Request a new one.',
+    expired: 'Link expired. Sending a new one...',
+    missing_token: 'Invalid link. Sending a new one...',
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-
-    try {
-      await fetch('/api/auth/magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+  useEffect(() => {
+    // Auto-send magic link on page load
+    fetch('/api/auth/magic-link', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.email) {
+          setEmail(data.email)
+          setSent(true)
+          setError('')
+        }
       })
-      setSent(true)
-    } catch {
-      setError('Connection error')
-    } finally {
-      setLoading(false)
-    }
-  }
+      .catch(() => setError('Connection error'))
+  }, [])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -44,7 +38,7 @@ function LoginContent() {
           Cloud Claude Code
         </p>
 
-        {error && (
+        {error && !sent && (
           <div className="badge-error p-3 rounded-lg mb-6 text-sm">
             {errorMessages[error] || error}
           </div>
@@ -53,35 +47,12 @@ function LoginContent() {
         {sent ? (
           <div>
             <p className="text-lg mb-2">Check your email</p>
-            <p className="text-foreground-muted text-sm mb-6">
-              We sent a sign-in link to <strong>{email}</strong>
+            <p className="text-foreground-muted text-sm">
+              Sign-in link sent to <strong>{email}</strong>
             </p>
-            <button
-              onClick={() => { setSent(false); setEmail('') }}
-              className="text-sm text-brand hover:underline"
-            >
-              Use a different email
-            </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email address"
-              autoFocus
-              required
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 mb-4 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
-            />
-            <button
-              type="submit"
-              disabled={loading || !email}
-              className="btn btn-primary w-full py-3 px-6 text-lg"
-            >
-              {loading ? 'Sending...' : 'Send sign-in link'}
-            </button>
-          </form>
+          <p className="text-foreground-muted">Sending sign-in link...</p>
         )}
       </div>
     </div>
