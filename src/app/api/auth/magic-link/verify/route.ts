@@ -1,30 +1,37 @@
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, signToken } from '@/lib/auth/jwt'
 
+function getBaseUrl(request: NextRequest): string {
+  const headersList = request.headers
+  const host = headersList.get('host') || 'c3.ideaplaces.com'
+  const proto = headersList.get('x-forwarded-proto') || 'https'
+  return `${proto}://${host}`
+}
+
 export async function GET(request: NextRequest) {
+  const baseUrl = getBaseUrl(request)
   const token = request.nextUrl.searchParams.get('token')
 
   if (!token) {
-    return NextResponse.redirect(new URL('/login?error=missing_token', request.url))
+    return NextResponse.redirect(`${baseUrl}/login?error=missing_token`)
   }
 
   const user = verifyToken(token)
   if (!user) {
-    return NextResponse.redirect(new URL('/login?error=expired', request.url))
+    return NextResponse.redirect(`${baseUrl}/login?error=expired`)
   }
 
-  // Issue a long-lived session token (30 days)
   const sessionToken = signToken(user)
 
   const cookieStore = await cookies()
   cookieStore.set('ccc_session', sessionToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     sameSite: 'lax',
     path: '/',
     maxAge: 30 * 24 * 60 * 60,
   })
 
-  return NextResponse.redirect(new URL('/sessions', request.url))
+  return NextResponse.redirect(`${baseUrl}/sessions`)
 }

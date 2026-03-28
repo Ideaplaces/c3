@@ -21,8 +21,11 @@ export async function POST() {
   const proto = headersList.get('x-forwarded-proto') || 'https'
   const baseUrl = `${proto}://${host}`
 
+  console.log(`[Magic Link] host=${host} proto=${proto} baseUrl=${baseUrl}`)
+
   const token = signToken({ email, name: email.split('@')[0], avatarUrl: null })
   const magicUrl = `${baseUrl}/api/auth/magic-link/verify?token=${token}`
+  console.log(`[Magic Link] magicUrl=${magicUrl.slice(0, 80)}...`)
 
   const resend = new Resend(apiKey)
   await resend.emails.send({
