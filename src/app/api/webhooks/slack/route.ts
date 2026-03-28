@@ -55,9 +55,11 @@ export async function POST(request: Request) {
       const slackMessage = [
         `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
         '',
-        summary.length > 2800 ? summary.slice(0, 2800) + '...' : summary,
+        summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary,
         '',
-        `View full session: ${baseUrl}/sessions/${sessionId}`,
+        `*Continue this conversation:*`,
+        `Terminal: \`claude --resume ${sessionId}\``,
+        `Browser: ${baseUrl}/sessions/${sessionId}`,
       ].join('\n')
 
       // Reply in thread (thread_ts = original message timestamp)
