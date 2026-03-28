@@ -1,15 +1,19 @@
 'use client'
 
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
 
 function LoginContent() {
   const searchParams = useSearchParams()
-  const router = useRouter()
-  const redirect = searchParams.get('redirect') || '/sessions'
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [sent, setSent] = useState(false)
   const [error, setError] = useState(searchParams.get('error') || '')
   const [loading, setLoading] = useState(false)
+
+  const errorMessages: Record<string, string> = {
+    expired: 'Link expired. Request a new one.',
+    missing_token: 'Invalid link. Request a new one.',
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -17,18 +21,12 @@ function LoginContent() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/auth/password', {
+      await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email }),
       })
-
-      if (res.ok) {
-        router.push(redirect)
-      } else {
-        setError('Wrong password')
-        setPassword('')
-      }
+      setSent(true)
     } catch {
       setError('Connection error')
     } finally {
@@ -48,27 +46,43 @@ function LoginContent() {
 
         {error && (
           <div className="badge-error p-3 rounded-lg mb-6 text-sm">
-            {error}
+            {errorMessages[error] || error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            autoFocus
-            className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 mb-4 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
-          />
-          <button
-            type="submit"
-            disabled={loading || !password}
-            className="btn btn-primary w-full py-3 px-6 text-lg"
-          >
-            {loading ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
+        {sent ? (
+          <div>
+            <p className="text-lg mb-2">Check your email</p>
+            <p className="text-foreground-muted text-sm mb-6">
+              We sent a sign-in link to <strong>{email}</strong>
+            </p>
+            <button
+              onClick={() => { setSent(false); setEmail('') }}
+              className="text-sm text-brand hover:underline"
+            >
+              Use a different email
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email address"
+              autoFocus
+              required
+              className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 mb-4 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+            />
+            <button
+              type="submit"
+              disabled={loading || !email}
+              className="btn btn-primary w-full py-3 px-6 text-lg"
+            >
+              {loading ? 'Sending...' : 'Send sign-in link'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )
