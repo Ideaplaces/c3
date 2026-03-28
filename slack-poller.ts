@@ -114,6 +114,10 @@ interface SlackApiResponse {
 
 const PROCESSED_REACTION = 'eyes'
 
+// Rate limiting: max 1 session per channel per 5 minutes
+const COOLDOWN_MS = 5 * 60 * 1000
+const lastSessionTime = new Map<string, number>()
+
 async function hasBeenProcessed(token: string, channelId: string, ts: string): Promise<boolean> {
   const res = await fetch(
     `https://slack.com/api/reactions.get?channel=${channelId}&timestamp=${ts}`,
@@ -202,6 +206,15 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       }
     }
 
+    // Rate limit: max 1 session per channel per 5 minutes
+    const lastTime = lastSessionTime.get(trigger.channelId) || 0
+    const now = Date.now()
+    if (now - lastTime < COOLDOWN_MS) {
+      const waitSec = Math.round((COOLDOWN_MS - (now - lastTime)) / 1000)
+      console.log(`[Slack Poller] Rate limited: channel ${trigger.channelId} cooldown (${waitSec}s remaining). Skipping.`)
+      continue
+    }
+
     console.log(`[Slack Poller] Processing message from ${author}: ${msg.text.slice(0, 100)}...`)
 
     // Forward to C3 webhook
@@ -224,6 +237,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       const result = await webhookRes.json() as { sessionId?: string; error?: string }
       if (webhookRes.ok && result.sessionId) {
         console.log(`[Slack Poller] Session started: ${result.sessionId}`)
+        lastSessionTime.set(trigger.channelId, Date.now())
       } else {
         console.error(`[Slack Poller] Webhook error:`, result.error)
       }
@@ -233,30 +247,8 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
   }
 }
 
-// Detect our own bot ID at startup so we never process our own messages
-async function detectOurBotId(): Promise<void> {
-  if (process.env.C3_SLACK_BOT_ID) return
-  const token = DEFAULT_SLACK_TOKEN
-  if (!token) return
-  try {
-    const res = await fetch('https://slack.com/api/auth.test', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-    const data = await res.json() as { ok: boolean; bot_id?: string }
-    if (data.ok && data.bot_id) {
-      // This is the monitoring bot. We need the C3 reply bot ID.
-      // The reply bot is different - it's set via DISCORD_BOT_TOKEN's Slack equivalent.
-      // For now, rely on C3_SLACK_BOT_ID env var.
-      console.log(`[Slack Poller] Slack auth bot_id: ${data.bot_id}`)
-    }
-  } catch {
-    // ignore
-  }
-}
-
 // Main loop
 async function main() {
-  await detectOurBotId()
   const triggers = loadTriggers()
   const slackTriggers = Object.values(triggers.slack || {})
 
