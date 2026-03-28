@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
     // Reply in Discord directly
     if (discordBotToken && messageId) {
-      const baseUrl = process.env.CCC_PUBLIC_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8347'
+      const baseUrl = process.env.C3_BASE_URL || 'https://c3.ideaplaces.com'
       const replyContent = [
         `**Session completed** (\`${sessionId.slice(0, 8)}\`)`,
         '',
