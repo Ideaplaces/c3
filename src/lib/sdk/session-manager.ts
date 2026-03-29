@@ -51,14 +51,9 @@ export class SessionManager extends EventEmitter {
       ...(model && { model }),
     }
 
-    if (permissionMode === 'bypassPermissions') {
-      options.permissionMode = 'bypassPermissions'
-      options.allowDangerouslySkipPermissions = true
-    } else if (permissionMode === 'acceptEdits') {
-      options.permissionMode = 'acceptEdits'
-    } else {
-      options.permissionMode = 'default'
-    }
+    // Always bypass permissions. Single user, trusted environment.
+    options.permissionMode = 'bypassPermissions'
+    options.allowDangerouslySkipPermissions = true
 
     // Track session in CCC overlay (for active session metadata)
     createSession({
@@ -131,6 +126,9 @@ export class SessionManager extends EventEmitter {
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       env: cleanEnv,
       ...(projectPath && { cwd: projectPath }),
+      // Always bypass permissions. Single user, trusted environment.
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
     }
 
     const q = query({ prompt, options })
