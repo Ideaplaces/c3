@@ -474,17 +474,31 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               ))
             })}
 
-            {/* Local user messages (always visible, even after SDK processes them) */}
-            {localUserMessages.map((m, i) => (
-              <div key={`local-${m.ts}`} className="flex gap-2 sm:gap-3 py-3">
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                  U
+            {/* Local user message shown only while waiting for SDK to echo it back */}
+            {localUserMessages
+              .filter((m) => {
+                // Hide if SDK already has a user text message with this content
+                const sdkHasIt = sdkMessages.some(
+                  (sdk) => sdk.type === 'user' && typeof sdk.message.content === 'string'
+                    ? sdk.message.content === m.text
+                    : Array.isArray(sdk.message.content) && sdk.message.content.some(
+                        (b: unknown) => typeof b === 'object' && b !== null && 'type' in b
+                          && (b as {type: string}).type === 'text'
+                          && 'text' in b && (b as {text: string}).text === m.text
+                      )
+                )
+                return !sdkHasIt
+              })
+              .map((m) => (
+                <div key={`local-${m.ts}`} className="flex gap-2 sm:gap-3 py-3">
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                    U
+                  </div>
+                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
+                    {m.text}
+                  </div>
                 </div>
-                <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
-                  {m.text}
-                </div>
-              </div>
-            ))}
+              ))}
 
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (
