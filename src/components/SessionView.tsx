@@ -485,33 +485,8 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               ))
             })}
 
-            {/* Local user messages: show until the next SDK user message appears after them */}
-            {localUserMessages
-              .filter((m) => {
-                // Count SDK user text messages that arrived after this local message was sent
-                const sdkUserTextsAfter = sdkMessages.filter((sdk, idx) => {
-                  if (sdk.type !== 'user') return false
-                  const content = sdk.message.content
-                  if (Array.isArray(content)) {
-                    return content.some((b: unknown) =>
-                      typeof b === 'object' && b !== null && 'type' in b && (b as {type: string}).type === 'text'
-                    )
-                  }
-                  return typeof content === 'string'
-                }).length
-                // Keep showing if the count of SDK user text messages hasn't grown since we sent
-                return sdkUserTextsAfter <= m.sdkUserCountAtSend
-              })
-              .map((m) => (
-                <div key={`local-${m.ts}`} className="flex gap-2 sm:gap-3 py-3">
-                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                    U
-                  </div>
-                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
-                    {m.text}
-                  </div>
-                </div>
-              ))}
+            {/* No local user messages rendered here. The SDK echoes them back
+                in the correct timeline position via displayGroups. */}
 
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (
