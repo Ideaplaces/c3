@@ -255,7 +255,7 @@ export function findSession(sessionId: string): ClaudeSessionEntry | undefined {
 
 /**
  * Decode the project directory name back to a path.
- * e.g. "-home-chipdev-ideaplaces-meta" -> "/home/chipdev/ideaplaces-meta"
+ * e.g. "-home-user-my-project" -> "/home/user/my-project"
  */
 export function decodeProjectDir(dirName: string): string {
   return dirName.replace(/-/g, '/')

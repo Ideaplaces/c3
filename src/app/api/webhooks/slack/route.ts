@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       console.log(`[Slack Webhook] Session ${sessionId} ended (${reason}), replying to Slack`)
 
       const summary = extractSummary(sessionId, reason)
-      const baseUrl = process.env.C3_BASE_URL || 'https://c3.ideaplaces.com'
+      const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
 
       const slackSummary = slackifyMarkdown(
         summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary

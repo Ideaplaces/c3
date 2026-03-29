@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/webhooks/']
 
 function getBaseUrl(request: NextRequest): string {
-  const host = request.headers.get('host') || 'c3.ideaplaces.com'
+  const host = request.headers.get('host') || 'localhost:8347'
   const proto = request.headers.get('x-forwarded-proto') || 'https'
   return `${proto}://${host}`
 }

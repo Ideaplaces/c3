@@ -4,7 +4,7 @@ import { verifyToken, signToken } from '@/lib/auth/jwt'
 
 function getBaseUrl(request: NextRequest): string {
   const headersList = request.headers
-  const host = headersList.get('host') || 'c3.ideaplaces.com'
+  const host = headersList.get('host') || 'localhost:8347'
   const proto = headersList.get('x-forwarded-proto') || 'https'
   return `${proto}://${host}`
 }

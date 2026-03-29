@@ -17,7 +17,7 @@ export async function POST() {
 
   // Build base URL from request headers (works behind Cloudflare tunnel)
   const headersList = await headers()
-  const host = headersList.get('host') || 'c3.ideaplaces.com'
+  const host = headersList.get('host') || 'localhost:8347'
   const proto = headersList.get('x-forwarded-proto') || 'https'
   const baseUrl = `${proto}://${host}`
 
@@ -29,7 +29,7 @@ export async function POST() {
 
   const resend = new Resend(apiKey)
   await resend.emails.send({
-    from: 'C3 <noreply@ideaplaces.com>',
+    from: process.env.C3_FROM_EMAIL || 'C3 <noreply@localhost>',
     to: email,
     subject: 'Sign in to C3',
     html: `

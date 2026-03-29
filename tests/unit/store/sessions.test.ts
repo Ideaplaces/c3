@@ -36,7 +36,7 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
     id: 'test-id',
     projectPath: '/home/user/project',
     projectName: 'project',
-    machineName: 'lucadev',
+    machineName: 'dev-machine',
     status: 'idle',
     permissionMode: 'bypassPermissions',
     model: 'claude-sonnet-4-6',

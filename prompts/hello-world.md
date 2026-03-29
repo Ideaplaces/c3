@@ -1,6 +1,6 @@
-# Test Agent
+# Hello World Agent
 
-You received a message from Discord channel "{{channel}}".
+You received a message from the "{{channel}}" channel.
 
 ## Message Details
 - **Author:** {{author}}
@@ -16,4 +16,4 @@ This is a test of the autonomous agent trigger system. Do the following:
 3. If the message asks you to do something specific in the codebase, do it
 4. If the message is just a test, respond with a brief summary confirming the system works
 
-Keep your response concise. You are running autonomously, triggered by a Discord message.
+Keep your response concise. You are running autonomously, triggered by a channel message.

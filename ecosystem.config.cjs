@@ -1,3 +1,7 @@
+const path = require('path');
+const home = process.env.HOME || '/tmp';
+const logsDir = path.join(home, '.c3', 'logs');
+
 module.exports = {
   apps: [
     {
@@ -11,8 +15,8 @@ module.exports = {
       },
       watch: false,
       max_memory_restart: '500M',
-      error_file: '/home/chipdev/.ccc/logs/ccc-error.log',
-      out_file: '/home/chipdev/.ccc/logs/ccc-out.log',
+      error_file: path.join(logsDir, 'ccc-error.log'),
+      out_file: path.join(logsDir, 'ccc-out.log'),
       merge_logs: true,
       time: true,
     },
@@ -28,8 +32,8 @@ module.exports = {
       },
       watch: false,
       max_memory_restart: '200M',
-      error_file: '/home/chipdev/.ccc/logs/bot-error.log',
-      out_file: '/home/chipdev/.ccc/logs/bot-out.log',
+      error_file: path.join(logsDir, 'bot-error.log'),
+      out_file: path.join(logsDir, 'bot-out.log'),
       merge_logs: true,
       time: true,
     },
@@ -44,8 +48,8 @@ module.exports = {
       },
       watch: false,
       max_memory_restart: '200M',
-      error_file: '/home/chipdev/.ccc/logs/slack-error.log',
-      out_file: '/home/chipdev/.ccc/logs/slack-out.log',
+      error_file: path.join(logsDir, 'slack-error.log'),
+      out_file: path.join(logsDir, 'slack-out.log'),
       merge_logs: true,
       time: true,
     },

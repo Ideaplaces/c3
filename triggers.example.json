@@ -1,0 +1,23 @@
+{
+  "channels": {
+    "my-discord-channel": {
+      "name": "my-discord-channel",
+      "channelId": "YOUR_DISCORD_CHANNEL_ID",
+      "prompt": "hello-world.md",
+      "projectPath": "~/my-project",
+      "permissionMode": "bypassPermissions",
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  "slack": {
+    "my-slack-channel": {
+      "name": "my-slack-channel",
+      "channelId": "YOUR_SLACK_CHANNEL_ID",
+      "prompt": "investigate-error.md",
+      "projectPath": "~/my-project",
+      "permissionMode": "bypassPermissions",
+      "model": "claude-sonnet-4-6",
+      "pollIntervalMs": 15000
+    }
+  }
+}

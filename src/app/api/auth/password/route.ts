@@ -15,8 +15,8 @@ export async function POST(request: Request) {
   }
 
   const token = signToken({
-    email: 'chip@ideaplaces.com',
-    name: 'Chip',
+    email: process.env.CCC_ALLOWED_EMAILS?.split(',')[0]?.trim() || 'user@localhost',
+    name: 'User',
     avatarUrl: null,
   })
 
