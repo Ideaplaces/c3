@@ -213,7 +213,7 @@ const PERMISSION_MODES = [
 export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
   const [permissionMode, setPermissionMode] = useState('bypassPermissions')
-  const [localUserMessages, setLocalUserMessages] = useState<{ text: string; ts: number }[]>([])
+  const [localUserMessages, setLocalUserMessages] = useState<{ text: string; ts: number; sdkUserCountAtSend: number }[]>([])
   const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
   const [historyCursor, setHistoryCursor] = useState<number | null>(null)
   const [historyHasMore, setHistoryHasMore] = useState(false)
@@ -386,7 +386,18 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     if (!input.trim() || !activeSessionId) return
     const text = input.trim()
     // Track the message locally so it appears immediately in the chat
-    setLocalUserMessages((prev) => [...prev, { text, ts: Date.now() }])
+    // Count current SDK user text messages so we know when the echo arrives
+    const currentUserTextCount = sdkMessages.filter((sdk) => {
+      if (sdk.type !== 'user') return false
+      const content = sdk.message.content
+      if (Array.isArray(content)) {
+        return content.some((b: unknown) =>
+          typeof b === 'object' && b !== null && 'type' in b && (b as {type: string}).type === 'text'
+        )
+      }
+      return typeof content === 'string'
+    }).length
+    setLocalUserMessages((prev) => [...prev, { text, ts: Date.now(), sdkUserCountAtSend: currentUserTextCount }])
     ws.sendPrompt(activeSessionId, text, permissionMode)
     setInput('')
     inputRef.current?.focus()
@@ -474,20 +485,22 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               ))
             })}
 
-            {/* Local user message shown only while waiting for SDK to echo it back */}
+            {/* Local user messages: show until the next SDK user message appears after them */}
             {localUserMessages
               .filter((m) => {
-                // Hide if SDK already has a user text message with this content
-                const sdkHasIt = sdkMessages.some(
-                  (sdk) => sdk.type === 'user' && typeof sdk.message.content === 'string'
-                    ? sdk.message.content === m.text
-                    : Array.isArray(sdk.message.content) && sdk.message.content.some(
-                        (b: unknown) => typeof b === 'object' && b !== null && 'type' in b
-                          && (b as {type: string}).type === 'text'
-                          && 'text' in b && (b as {text: string}).text === m.text
-                      )
-                )
-                return !sdkHasIt
+                // Count SDK user text messages that arrived after this local message was sent
+                const sdkUserTextsAfter = sdkMessages.filter((sdk, idx) => {
+                  if (sdk.type !== 'user') return false
+                  const content = sdk.message.content
+                  if (Array.isArray(content)) {
+                    return content.some((b: unknown) =>
+                      typeof b === 'object' && b !== null && 'type' in b && (b as {type: string}).type === 'text'
+                    )
+                  }
+                  return typeof content === 'string'
+                }).length
+                // Keep showing if the count of SDK user text messages hasn't grown since we sent
+                return sdkUserTextsAfter <= m.sdkUserCountAtSend
               })
               .map((m) => (
                 <div key={`local-${m.ts}`} className="flex gap-2 sm:gap-3 py-3">
