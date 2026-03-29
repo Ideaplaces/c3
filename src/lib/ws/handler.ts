@@ -3,7 +3,8 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { UserPayload, ClientMessage, ServerMessage } from '@/types/ws'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
-import { readSessionTail, readSessionBefore } from '@/lib/claude-sessions/reader'
+import { readSessionTail, readSessionBefore, readSessionJSONL } from '@/lib/claude-sessions/reader'
+import { statSync } from 'fs'
 
 const clientSessions = new Map<WebSocket, Set<string>>()
 
@@ -130,17 +131,58 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
           sessionManager.on('sdk_event', onSdkEvent)
           sessionManager.on('session_ended', onSessionEnded)
         } else {
-          // Inactive session: read only the tail from disk for fast loading
+          // Session not in active map. Could be completed, or still running
+          // but we lost track (e.g., after a PM2 restart).
           const jsonlPath = getSessionJSONLPath(sessionId)
           if (jsonlPath) {
-            const { events, cursor, hasMore } = readSessionTail(jsonlPath)
-            console.log(`[WS] Sending ${events.length} tail events for session ${sessionId} (cursor=${cursor}, hasMore=${hasMore})`)
-            for (const event of events) {
+            // Send current events
+            const allEvents = readSessionJSONL(jsonlPath)
+            const { cursor, hasMore } = readSessionTail(jsonlPath)
+            console.log(`[WS] Sending ${allEvents.length} events for session ${sessionId}`)
+            for (const event of allEvents) {
               send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
             }
             send(ws, { type: 'history_batch', sessionId, messages: [], cursor, hasMore })
+
+            // Poll JSONL file for new events (session might still be running)
+            let sentCount = allEvents.length
+            let lastSize = statSync(jsonlPath).size
+            let idleCount = 0
+
+            const pollTimer = setInterval(() => {
+              try {
+                if (ws.readyState !== ws.OPEN) {
+                  clearInterval(pollTimer)
+                  return
+                }
+                const currentSize = statSync(jsonlPath).size
+                if (currentSize > lastSize) {
+                  idleCount = 0
+                  lastSize = currentSize
+                  const updatedEvents = readSessionJSONL(jsonlPath)
+                  const newEvents = updatedEvents.slice(sentCount)
+                  for (const event of newEvents) {
+                    send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
+                  }
+                  sentCount = updatedEvents.length
+                } else {
+                  idleCount++
+                  // After 30 seconds of no changes, session is done
+                  if (idleCount >= 15) {
+                    clearInterval(pollTimer)
+                    send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
+                  }
+                }
+              } catch {
+                clearInterval(pollTimer)
+              }
+            }, 2000)
+
+            ws.on('close', () => clearInterval(pollTimer))
+            send(ws, { type: 'session_started', sessionId })
+          } else {
+            send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
           }
-          send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
         }
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to subscribe' })
