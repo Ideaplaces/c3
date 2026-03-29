@@ -206,7 +206,7 @@ function ActivityGroup({ group, toolResults }: {
 
 export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
-  const [localUserMessages, setLocalUserMessages] = useState<{ text: string; idx: number }[]>([])
+  const [localUserMessages, setLocalUserMessages] = useState<{ text: string; ts: number }[]>([])
   const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
   const [historyCursor, setHistoryCursor] = useState<number | null>(null)
   const [historyHasMore, setHistoryHasMore] = useState(false)
@@ -379,7 +379,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     if (!input.trim() || !activeSessionId) return
     const text = input.trim()
     // Track the message locally so it appears immediately in the chat
-    setLocalUserMessages((prev) => [...prev, { text, idx: sdkMessages.length }])
+    setLocalUserMessages((prev) => [...prev, { text, ts: Date.now() }])
     ws.sendPrompt(activeSessionId, text)
     setInput('')
     inputRef.current?.focus()
@@ -403,6 +403,9 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           {displayProject && (
             <span className="font-medium font-mono text-sm truncate">{displayProject}</span>
           )}
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-info/10 text-info font-mono shrink-0">
+            bypass
+          </span>
           {isRunning && (
             <span className="inline-flex items-center gap-1.5 text-xs text-info shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
@@ -457,19 +460,17 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               ))
             })}
 
-            {/* Local user messages that haven't been echoed back by the SDK yet */}
-            {localUserMessages
-              .filter((m) => m.idx >= sdkMessages.length)
-              .map((m, i) => (
-                <div key={`local-${i}`} className="flex gap-2 sm:gap-3 py-3">
-                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                    U
-                  </div>
-                  <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
-                    {m.text}
-                  </div>
+            {/* Local user messages (always visible, even after SDK processes them) */}
+            {localUserMessages.map((m, i) => (
+              <div key={`local-${m.ts}`} className="flex gap-2 sm:gap-3 py-3">
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                  U
                 </div>
-              ))}
+                <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
+                  {m.text}
+                </div>
+              </div>
+            ))}
 
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (
