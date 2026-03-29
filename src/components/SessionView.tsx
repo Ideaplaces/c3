@@ -205,9 +205,9 @@ function ActivityGroup({ group, toolResults }: {
 }
 
 const PERMISSION_MODES = [
-  { value: 'bypassPermissions', label: 'bypass', color: 'text-info bg-info/10' },
-  { value: 'acceptEdits', label: 'auto-edit', color: 'text-warning bg-warning/10' },
-  { value: 'default', label: 'default', color: 'text-foreground-muted bg-surface' },
+  { value: 'bypassPermissions', label: 'bypass', color: 'text-info bg-info/10', enabled: true },
+  { value: 'acceptEdits', label: 'auto-edit (coming soon)', color: 'text-warning bg-warning/10', enabled: false },
+  { value: 'default', label: 'default (coming soon)', color: 'text-foreground-muted bg-surface', enabled: false },
 ] as const
 
 export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
@@ -418,7 +418,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
             }`}
           >
             {PERMISSION_MODES.map(mode => (
-              <option key={mode.value} value={mode.value}>{mode.label}</option>
+              <option key={mode.value} value={mode.value} disabled={!mode.enabled}>{mode.label}</option>
             ))}
           </select>
           {isRunning && (
@@ -429,14 +429,13 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {isRunning && activeSessionId && (
-            <button
-              onClick={() => ws.stopSession(activeSessionId)}
-              className="btn btn-destructive px-3 py-1 text-xs"
-            >
-              Stop
-            </button>
-          )}
+          <button
+            onClick={() => activeSessionId && ws.stopSession(activeSessionId)}
+            disabled={!isRunning || !activeSessionId}
+            className="btn btn-destructive px-3 py-1 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Stop
+          </button>
         </div>
       </header>
 
