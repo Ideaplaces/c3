@@ -51,6 +51,6 @@ app.prepare().then(() => {
   })
 
   server.listen(port, hostname, () => {
-    console.log(`> CCC server ready on http://${hostname}:${port}`)
+    console.log(`> C3 server ready on http://${hostname}:${port}`)
   })
 })
