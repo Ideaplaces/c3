@@ -14,7 +14,7 @@ interface SessionViewProps {
     messages: ServerMessage[]
     connected: boolean
     sessionId: string | null
-    sendPrompt: (sessionId: string, prompt: string) => void
+    sendPrompt: (sessionId: string, prompt: string, permissionMode?: string) => void
     stopSession: (sessionId: string) => void
     loadPrevious: (sessionId: string, cursor: number) => void
   }
@@ -204,8 +204,15 @@ function ActivityGroup({ group, toolResults }: {
   )
 }
 
+const PERMISSION_MODES = [
+  { value: 'bypassPermissions', label: 'bypass', color: 'text-info bg-info/10' },
+  { value: 'acceptEdits', label: 'auto-edit', color: 'text-warning bg-warning/10' },
+  { value: 'default', label: 'default', color: 'text-foreground-muted bg-surface' },
+] as const
+
 export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
+  const [permissionMode, setPermissionMode] = useState('bypassPermissions')
   const [localUserMessages, setLocalUserMessages] = useState<{ text: string; ts: number }[]>([])
   const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
   const [historyCursor, setHistoryCursor] = useState<number | null>(null)
@@ -380,7 +387,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     const text = input.trim()
     // Track the message locally so it appears immediately in the chat
     setLocalUserMessages((prev) => [...prev, { text, ts: Date.now() }])
-    ws.sendPrompt(activeSessionId, text)
+    ws.sendPrompt(activeSessionId, text, permissionMode)
     setInput('')
     inputRef.current?.focus()
   }
@@ -403,9 +410,17 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           {displayProject && (
             <span className="font-medium font-mono text-sm truncate">{displayProject}</span>
           )}
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-info/10 text-info font-mono shrink-0">
-            bypass
-          </span>
+          <select
+            value={permissionMode}
+            onChange={(e) => setPermissionMode(e.target.value)}
+            className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 cursor-pointer border-0 outline-none appearance-auto ${
+              PERMISSION_MODES.find(m => m.value === permissionMode)?.color || 'bg-surface'
+            }`}
+          >
+            {PERMISSION_MODES.map(mode => (
+              <option key={mode.value} value={mode.value}>{mode.label}</option>
+            ))}
+          </select>
           {isRunning && (
             <span className="inline-flex items-center gap-1.5 text-xs text-info shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />

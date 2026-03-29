@@ -51,9 +51,15 @@ export class SessionManager extends EventEmitter {
       ...(model && { model }),
     }
 
-    // Always bypass permissions. Single user, trusted environment.
-    options.permissionMode = 'bypassPermissions'
-    options.allowDangerouslySkipPermissions = true
+    // Default to bypass. Can be overridden by the client.
+    if (permissionMode === 'acceptEdits') {
+      options.permissionMode = 'acceptEdits'
+    } else if (permissionMode === 'default') {
+      options.permissionMode = 'default'
+    } else {
+      options.permissionMode = 'bypassPermissions'
+      options.allowDangerouslySkipPermissions = true
+    }
 
     // Track session in CCC overlay (for active session metadata)
     createSession({
