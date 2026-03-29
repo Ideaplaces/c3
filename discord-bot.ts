@@ -36,12 +36,28 @@ interface TriggersConfig {
   channels: Record<string, ChannelTrigger>
 }
 
+function findTriggersJson(): string {
+  const home = process.env.HOME || '/tmp'
+  if (process.env.C3_CONFIG_DIR) {
+    return path.join(process.env.C3_CONFIG_DIR, 'triggers.json')
+  }
+  const candidates = [
+    path.join(home, '.c3', 'triggers.json'),
+    path.join(process.cwd(), 'triggers.json'),
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p
+  }
+  return path.join(process.cwd(), 'triggers.json')
+}
+
 function loadTriggers(): TriggersConfig {
-  const triggersPath = path.join(process.cwd(), 'triggers.json')
+  const triggersPath = findTriggersJson()
+  console.log(`[Bot] Loading triggers from ${triggersPath}`)
   try {
     return JSON.parse(fs.readFileSync(triggersPath, 'utf-8'))
   } catch {
-    console.error('[Bot] Failed to load triggers.json')
+    console.error(`[Bot] Failed to load ${triggersPath}`)
     return { channels: {} }
   }
 }
