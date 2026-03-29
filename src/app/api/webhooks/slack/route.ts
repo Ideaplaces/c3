@@ -42,8 +42,42 @@ export async function POST(request: Request) {
 
   console.log(`[Slack Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
 
-  // On completion: reply to the Slack thread
   const slackBotToken = trigger.slackBotToken || process.env.SLACK_BOT_TOKEN
+  const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
+
+  // Immediately notify: session started (reply in thread)
+  if (slackBotToken && messageTs) {
+    const startMessage = [
+      `:robot_face: *Session started* (\`${sessionId.slice(0, 8)}\`)`,
+      `Watch live: ${baseUrl}/sessions/${sessionId}`,
+    ].join('\n')
+
+    fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${slackBotToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        channel: channelId,
+        thread_ts: messageTs,
+        reply_broadcast: false,
+        text: startMessage,
+        unfurl_links: false,
+      }),
+    })
+      .then(res => res.json())
+      .then((data: Record<string, unknown>) => {
+        if (data.ok) {
+          console.log(`[Slack Webhook] Session start notification sent for ${sessionId}`)
+        } else {
+          console.error(`[Slack Webhook] Start notification failed:`, data.error)
+        }
+      })
+      .catch(err => console.error(`[Slack Webhook] Start notification error:`, err))
+  }
+
+  // On completion: reply to the Slack thread with findings
   if (slackBotToken && messageTs) {
     const onSessionEnded = (sid: string, reason: string) => {
       if (sid !== sessionId) return
@@ -51,7 +85,6 @@ export async function POST(request: Request) {
       console.log(`[Slack Webhook] Session ${sessionId} ended (${reason}), replying to Slack`)
 
       const summary = extractSummary(sessionId, reason)
-      const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
 
       const slackSummary = slackifyMarkdown(
         summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
