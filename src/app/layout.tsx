@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   title: 'C3 — Claude Code, from any browser',
   description: 'Remote Claude Code sessions and autonomous agents triggered by Discord and Slack. Open source.',
   icons: {
-    icon: '/favicon.svg',
+    icon: '/favicon.ico',
+    apple: '/apple-touch-icon.png',
   },
   openGraph: {
     title: 'C3 — Claude Code, from any browser',
