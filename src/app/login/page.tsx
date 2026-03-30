@@ -2,6 +2,7 @@
 
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect } from 'react'
+import { Card } from '@/components/ui/Card'
 
 function LoginContent() {
   const searchParams = useSearchParams()
@@ -15,7 +16,6 @@ function LoginContent() {
   }
 
   useEffect(() => {
-    // Auto-send magic link on page load
     fetch('/api/auth/magic-link', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
@@ -30,7 +30,7 @@ function LoginContent() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="card p-6 sm:p-8 w-full max-w-md text-center">
+      <Card className="p-6 sm:p-8 w-full max-w-md text-center">
         <h1 className="text-3xl font-bold mb-2 font-heading">
           <span className="text-gradient">C3</span>
         </h1>
@@ -39,7 +39,7 @@ function LoginContent() {
         </p>
 
         {error && !sent && (
-          <div className="badge-error p-3 rounded-lg mb-6 text-sm">
+          <div className="bg-error/10 border border-error/30 text-error p-3 rounded-lg mb-6 text-sm">
             {errorMessages[error] || error}
           </div>
         )}
@@ -54,7 +54,7 @@ function LoginContent() {
         ) : (
           <p className="text-foreground-muted">Sending sign-in link...</p>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './tools/ToolCallBlock'
+import { Avatar } from './ui/Avatar'
 import { extractUserMessageText } from '@/lib/messages/user-content'
 
 interface ChatMessageProps {
@@ -37,7 +38,6 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
     }
 
     case 'user': {
-      // Skip replayed messages (they're context, not new conversation)
       if ('isReplay' in message && message.isReplay) return null
 
       const text = extractUserMessageText(message.message.content)
@@ -45,9 +45,7 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
 
       return (
         <div className="flex gap-2 sm:gap-3 py-3">
-          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-            U
-          </div>
+          <Avatar name="User" color="primary" size="sm" />
           <div className="flex-1 text-sm whitespace-pre-wrap pt-0.5 min-w-0 break-words">
             {text}
           </div>
@@ -59,7 +57,6 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const blocks: any[] = message.message.content || []
 
-      // Separate text/thinking blocks from tool_use blocks
       const textBlocks = blocks.filter((b) => b.type === 'text' && b.text?.trim())
       const thinkingBlocks = blocks.filter((b) => b.type === 'thinking' && b.thinking)
       const toolBlocks = blocks.filter((b) => b.type === 'tool_use')
@@ -68,7 +65,6 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
       const hasThinking = thinkingBlocks.length > 0
       const hasTools = toolBlocks.length > 0
 
-      // If this message is ONLY tool calls (no text), render compactly without the avatar
       if (!hasText && !hasThinking && hasTools) {
         return (
           <div className="pl-0 sm:pl-10 space-y-1">
@@ -91,9 +87,7 @@ export function ChatMessage({ message, toolResults }: ChatMessageProps) {
 
       return (
         <div className="flex gap-2 sm:gap-3 py-2">
-          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
-            C
-          </div>
+          <Avatar name="Claude" color="secondary" size="sm" />
           <div className="flex-1 space-y-2 min-w-0 break-words">
             {blocks.map((block, i) => {
               if (block.type === 'text' && block.text?.trim()) {

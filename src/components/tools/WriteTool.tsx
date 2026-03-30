@@ -1,6 +1,6 @@
 'use client'
 
-import { CodeBlock } from '@/components/CodeBlock'
+import { CodeBlock } from '@/components/ui/CodeBlock'
 import { getLanguageFromPath } from '@/lib/messages/language'
 
 interface WriteToolProps {

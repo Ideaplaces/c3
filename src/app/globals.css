@@ -75,10 +75,10 @@
   --color-popover: #0f172a;
   --color-popover-foreground: #f1f5f9;
 
-  /* Fonts - from styleguide */
-  --font-sans: 'Roboto', system-ui, sans-serif;
-  --font-heading: 'Montserrat', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  /* Fonts - loaded via next/font/google */
+  --font-sans: var(--font-roboto), system-ui, sans-serif;
+  --font-heading: var(--font-montserrat), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), 'Fira Code', ui-monospace, monospace;
 
   /* Border radius - from styleguide */
   --radius-none: 0;
@@ -159,126 +159,7 @@ code {
   padding: 0.15em 0.4em;
 }
 
-/* ============================================
-   CARD STYLES
-   ============================================ */
-
-.card {
-  background-color: var(--color-card);
-  color: var(--color-card-foreground);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  transition: all 200ms ease;
-}
-
-.card:hover {
-  border-color: var(--color-border-light);
-}
-
-.card-interactive:hover {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 30px rgba(255, 79, 109, 0.1);
-}
-
-/* ============================================
-   BUTTON STYLES
-   ============================================ */
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  border-radius: var(--radius-md);
-  transition: all 200ms ease;
-  cursor: pointer;
-}
-
-.btn-primary {
-  background-color: var(--color-primary);
-  color: var(--color-primary-foreground);
-  box-shadow: var(--shadow-glow-primary);
-}
-
-.btn-primary:hover {
-  background-color: var(--color-primary-dark);
-  box-shadow: 0 0 30px rgba(255, 79, 109, 0.6);
-}
-
-.btn-secondary {
-  background-color: var(--color-secondary);
-  color: var(--color-secondary-foreground);
-}
-
-.btn-secondary:hover {
-  background-color: var(--color-secondary-light);
-}
-
-.btn-outline {
-  background-color: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-foreground);
-}
-
-.btn-outline:hover {
-  background-color: var(--color-muted);
-}
-
-.btn-destructive {
-  background-color: var(--color-destructive);
-  color: var(--color-destructive-foreground);
-}
-
-.btn:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-ring);
-}
-
-/* ============================================
-   BADGE STYLES
-   ============================================ */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border-radius: var(--radius-full);
-  background-color: rgba(255, 79, 109, 0.15);
-  color: var(--color-primary);
-  border: 1px solid rgba(255, 79, 109, 0.3);
-}
-
-.badge-secondary {
-  background-color: rgba(0, 125, 255, 0.15);
-  color: var(--color-secondary);
-  border-color: rgba(0, 125, 255, 0.3);
-}
-
-.badge-success {
-  background-color: var(--color-success-light);
-  color: var(--color-success);
-  border-color: rgba(76, 175, 80, 0.3);
-}
-
-.badge-warning {
-  background-color: var(--color-warning-light);
-  color: var(--color-warning);
-  border-color: rgba(255, 152, 0, 0.3);
-}
-
-.badge-error {
-  background-color: var(--color-error-light);
-  color: var(--color-error);
-  border-color: rgba(244, 67, 54, 0.3);
-}
-
-.badge-info {
-  background-color: var(--color-info-light);
-  color: var(--color-info);
-  border-color: rgba(33, 150, 243, 0.3);
-}
+/* Card, Button, Badge styles removed — now handled by UI components */
 
 /* ============================================
    TABLE STYLES

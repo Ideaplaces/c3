@@ -1,6 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Dialog } from './ui/Dialog'
+import { Select } from './ui/Select'
+import { Textarea } from './ui/Textarea'
+import { Button } from './ui/Button'
 
 interface Project {
   name: string
@@ -55,111 +59,81 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 sm:p-4">
-      <div className="card p-4 sm:p-6 w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold font-heading">New Session</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="sm:hidden text-foreground-muted hover:text-foreground p-1"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <Dialog open={open} onClose={onClose} title="New Session">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Select
+          label="Project"
+          value={selectedProject}
+          onChange={(e) => setSelectedProject(e.target.value)}
+        >
+          {projects.map((p) => (
+            <option key={p.path} value={p.path}>{p.name}</option>
+          ))}
+        </Select>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground-muted mb-1">
+            Permission Mode
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { value: 'bypassPermissions', label: 'Bypass' },
+              { value: 'acceptEdits', label: 'Accept Edits' },
+              { value: 'default', label: 'Default' },
+            ].map((mode) => (
+              <Button
+                key={mode.value}
+                type="button"
+                variant={permissionMode === mode.value ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => setPermissionMode(mode.value)}
+              >
+                {mode.label}
+              </Button>
+            ))}
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1">
-              Project
-            </label>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full bg-surface border border-border rounded-md px-3 py-2.5 text-foreground focus:border-primary focus:outline-none"
-            >
-              {projects.map((p) => (
-                <option key={p.path} value={p.path}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+        <Select
+          label="Model (optional)"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+        >
+          <option value="">Default (Sonnet)</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+          <option value="claude-opus-4-6">Claude Opus 4.6</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+        </Select>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1">
-              Permission Mode
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: 'bypassPermissions', label: 'Bypass' },
-                { value: 'acceptEdits', label: 'Accept Edits' },
-                { value: 'default', label: 'Default' },
-              ].map((mode) => (
-                <button
-                  key={mode.value}
-                  type="button"
-                  onClick={() => setPermissionMode(mode.value)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    permissionMode === mode.value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-surface border border-border text-foreground-muted hover:bg-muted'
-                  }`}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        <Textarea
+          label="Prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="What do you want Claude to do?"
+          rows={4}
+          autoFocus
+        />
 
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1">
-              Model (optional)
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-surface border border-border rounded-md px-3 py-2.5 text-foreground focus:border-primary focus:outline-none"
-            >
-              <option value="">Default (Sonnet)</option>
-              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-              <option value="claude-opus-4-6">Claude Opus 4.6</option>
-              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1">
-              Prompt
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="What do you want Claude to do?"
-              rows={4}
-              className="w-full bg-surface border border-border rounded-md px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none resize-none"
-              autoFocus
-            />
-          </div>
-
-          <div className="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn btn-outline px-4 py-2 hidden sm:inline-flex"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!selectedProject || !prompt.trim() || loading}
-              className="btn btn-primary px-4 py-2.5 w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Starting...' : 'Start Session'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex gap-3 justify-end pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="hidden sm:inline-flex"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!selectedProject || !prompt.trim()}
+            loading={loading}
+            className="w-full sm:w-auto"
+          >
+            {loading ? 'Starting...' : 'Start Session'}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }

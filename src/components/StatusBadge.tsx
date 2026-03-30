@@ -1,32 +1,20 @@
 import type { SessionStatus } from '@/lib/store/types'
+import { Badge, type BadgeVariant } from './ui/Badge'
+import { StatusDot } from './ui/StatusDot'
 
-const statusConfig: Record<SessionStatus, { label: string; className: string }> = {
-  running: {
-    label: 'Running',
-    className: 'badge-info animate-pulse-glow',
-  },
-  idle: {
-    label: 'Idle',
-    className: 'bg-[rgba(156,163,175,0.15)] text-[#9ca3af] border-[rgba(156,163,175,0.3)]',
-  },
-  completed: {
-    label: 'Completed',
-    className: 'badge-success',
-  },
-  error: {
-    label: 'Error',
-    className: 'badge-error',
-  },
+const statusConfig: Record<SessionStatus, { label: string; variant: BadgeVariant }> = {
+  running: { label: 'Running', variant: 'info' },
+  idle: { label: 'Idle', variant: 'idle' },
+  completed: { label: 'Completed', variant: 'success' },
+  error: { label: 'Error', variant: 'error' },
 }
 
 export function StatusBadge({ status }: { status: SessionStatus }) {
   const config = statusConfig[status]
   return (
-    <span className={`badge ${config.className}`}>
-      {status === 'running' && (
-        <span className="w-2 h-2 rounded-full bg-current mr-2 animate-pulse" />
-      )}
+    <Badge variant={config.variant} className={status === 'running' ? 'animate-pulse-glow' : ''}>
+      {status === 'running' && <StatusDot status="running" className="mr-2" />}
       {config.label}
-    </span>
+    </Badge>
   )
 }

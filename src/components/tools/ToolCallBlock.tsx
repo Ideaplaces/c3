@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { getToolSummary } from '@/lib/messages/parser'
+import { Badge } from '../ui/Badge'
 import { BashTool } from './BashTool'
 import { ReadTool } from './ReadTool'
 import { EditTool } from './EditTool'
@@ -68,7 +69,7 @@ export function ToolCallBlock({ toolName, toolId, input, output, isError }: Tool
     <div className={`border rounded-md overflow-hidden ${isError ? 'border-error/30' : 'border-border'}`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors"
+        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors min-h-[44px]"
         data-tool-id={toolId}
       >
         <span className="text-xs select-none shrink-0">{expanded ? '\u25BC' : '\u25B6'}</span>
@@ -77,7 +78,7 @@ export function ToolCallBlock({ toolName, toolId, input, output, isError }: Tool
           {summary}
         </span>
         {isError && (
-          <span className="badge badge-error text-[10px] px-1.5 py-0.5 shrink-0">error</span>
+          <Badge variant="error" className="text-[10px] px-1.5 py-0.5 shrink-0">error</Badge>
         )}
       </button>
       {expanded && (
