@@ -45,35 +45,31 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to staging slot
+      - name: Deploy to production
         run: |
           az webapp config container set \
             --name ${{ env.AZURE_WEBAPP_NAME }} \
             --resource-group rg-ideaplaces \
-            --slot staging \
             --container-image-name "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:prod-${{ github.sha }}" \
             --container-registry-url "https://${{ env.ACR_LOGIN_SERVER }}" \
             --container-registry-user "${{ secrets.ACR_USERNAME }}" \
             --container-registry-password "${{ secrets.ACR_PASSWORD }}"
           echo "Container config updated, waiting for restart..."
 
-      - name: Wait for staging slot to be healthy
+      - name: Wait for production to be healthy
         run: |
-          SLOT_URL="https://${{ env.AZURE_WEBAPP_NAME }}-staging.azurewebsites.net/api/health"
+          PROD_URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
 
-          # Wait for the old container to stop (config change triggers automatic restart)
-          echo "Waiting for container restart to begin..."
+          echo "Waiting for container restart..."
           sleep 20
 
-          # Wait for a non-200 response (confirms old container is down)
-          # or skip if it already went down during the sleep
           echo "Polling until new container is healthy..."
           SEEN_DOWN=false
           for i in $(seq 1 60); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$SLOT_URL" --max-time 5 2>/dev/null || echo "000")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL" --max-time 5 2>/dev/null || echo "000")
             if [ "$STATUS" = "200" ]; then
               if [ "$SEEN_DOWN" = true ] || [ "$i" -gt 5 ]; then
-                echo "Staging slot healthy after ${i} attempts"
+                echo "Production healthy after ${i} attempts"
                 exit 0
               fi
               echo "Attempt $i: still seeing old container (HTTP $STATUS), waiting..."
@@ -83,14 +79,5 @@ jobs:
             fi
             sleep 5
           done
-          echo "Staging slot failed to become healthy after 5 minutes"
+          echo "Production failed to become healthy after 5 minutes"
           exit 1
-
-      - name: Swap staging to production
-        run: |
-          az webapp deployment slot swap \
-            --name ${{ env.AZURE_WEBAPP_NAME }} \
-            --resource-group rg-ideaplaces \
-            --slot staging \
-            --target-slot production
-          echo "Swap complete. Production is now running the new version."
