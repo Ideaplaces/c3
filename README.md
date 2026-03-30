@@ -70,13 +70,14 @@ npx pm2 start ecosystem.config.cjs   # Starts C3 + Discord bot + Slack poller
 
 ### How triggers work
 
-1. A message appears in a configured channel
+1. A message appears in a configured channel (e.g., a production error alert)
 2. The poller/bot forwards it to C3's webhook endpoint
 3. C3 loads the prompt template, injects the message content
 4. `sessionManager.startSession()` spawns a headless Claude Code agent
-5. The agent runs autonomously (reads files, runs commands, creates PRs)
-6. On completion, C3 replies in the channel thread with findings
-7. You can continue the conversation in the browser or CLI: `claude --resume SESSION_ID`
+5. **C3 immediately replies in the thread** with "Session started" and a live browser link, so you can jump in and watch from your phone
+6. The agent runs autonomously (reads files, runs commands, creates PRs)
+7. On completion, C3 replies in the channel thread with a structured report (root cause, severity, action taken, recommendation)
+8. You can continue the conversation in the browser or via CLI: `claude --resume SESSION_ID`
 
 ### Example: Production alert monitoring
 
