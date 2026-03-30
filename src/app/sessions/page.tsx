@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { SessionMeta } from '@/lib/store/types'
 import { SessionsTable } from '@/components/SessionsTable'
 import { NewSessionDialog } from '@/components/NewSessionDialog'
+import { Button } from '@/components/ui/Button'
 
 export default function SessionsPage() {
   const router = useRouter()
@@ -44,7 +45,6 @@ export default function SessionsPage() {
     permissionMode: string
     model?: string
   }) => {
-    // Navigate to a new session view that will handle the WS connection
     const params = new URLSearchParams({
       projectPath: data.projectPath,
       prompt: data.prompt,
@@ -57,7 +57,7 @@ export default function SessionsPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border px-4 sm:px-6 py-3 sm:py-4">
+      <header className="border-b border-border px-4 sm:px-6 py-3 sm:py-4 relative">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold font-heading">
@@ -69,23 +69,29 @@ export default function SessionsPage() {
             {user && (
               <span className="text-sm text-foreground-muted hidden sm:inline">{user.name}</span>
             )}
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={() => setDialogOpen(true)}
-              className="btn btn-primary px-3 sm:px-4 py-2 text-sm"
             >
               <span className="sm:hidden">+ New</span>
               <span className="hidden sm:inline">+ New Session</span>
-            </button>
-            <a href="/api/auth/logout" className="btn btn-outline px-3 py-1.5 text-sm">
+            </Button>
+            <a
+              href="/api/auth/logout"
+              className="inline-flex items-center justify-center font-semibold rounded-md transition-all duration-200 bg-transparent border border-border text-foreground hover:bg-muted px-2.5 py-1 text-xs min-h-[32px]"
+            >
               Logout
             </a>
           </div>
         </div>
+        {/* Header glow line */}
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-primary via-secondary to-primary opacity-30" />
       </header>
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
-        <SessionsTable sessions={sessions} loading={loading} />
+        <SessionsTable sessions={sessions} loading={loading} onNewSession={() => setDialogOpen(true)} />
       </main>
 
       <NewSessionDialog

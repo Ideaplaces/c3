@@ -5,6 +5,8 @@ import Link from 'next/link'
 import type { ServerMessage } from '@/types/ws'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { ChatMessage } from './ChatMessage'
+import { Avatar } from './ui/Avatar'
+import { Button } from './ui/Button'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { useStreamAccumulator, type AccumulatedBlock } from '@/hooks/useStreamAccumulator'
 import { getToolSummary } from '@/lib/messages/parser'
@@ -38,7 +40,7 @@ function LoadingIndicator({ status }: { status: string }) {
       <Spinner />
       <div className="text-foreground-muted text-sm">{status}</div>
       <div className="text-foreground-muted/50 text-xs">
-        Claude Code is starting up — this can take 5-15 seconds
+        Claude Code is starting up
       </div>
     </div>
   )
@@ -84,7 +86,6 @@ function StreamingBlock({ block }: { block: AccumulatedBlock }) {
 interface DisplayGroup {
   type: 'user' | 'assistant-text' | 'activity' | 'system' | 'result'
   messages: SDKMessage[]
-  // For activity groups: summary of tool calls
   toolSummaries?: string[]
 }
 
@@ -119,19 +120,16 @@ function groupMessages(messages: SDKMessage[]): DisplayGroup[] {
     }
 
     if (msg.type === 'user') {
-      // Check if this is a tool_result message (skip it)
       const content = msg.message.content
       if (Array.isArray(content)) {
         const hasToolResult = content.some(
           (block: unknown) => typeof block === 'object' && block !== null && 'type' in block && (block as { type: string }).type === 'tool_result'
         )
         if (hasToolResult) {
-          // Tool results are part of the current activity flow
           currentActivity.push(msg)
           continue
         }
       }
-      // Real user message
       flushActivity()
       groups.push({ type: 'user', messages: [msg] })
       continue
@@ -144,11 +142,9 @@ function groupMessages(messages: SDKMessage[]): DisplayGroup[] {
       const toolUses = blocks.filter((b) => b.type === 'tool_use')
 
       if (hasText) {
-        // This assistant message has actual text content — show it prominently
         flushActivity()
         groups.push({ type: 'assistant-text', messages: [msg] })
       } else if (toolUses.length > 0) {
-        // Tool-only message — accumulate into activity group
         currentActivity.push(msg)
         for (const tool of toolUses) {
           currentToolSummaries.push(
@@ -156,13 +152,11 @@ function groupMessages(messages: SDKMessage[]): DisplayGroup[] {
           )
         }
       } else {
-        // Thinking-only or empty — accumulate
         currentActivity.push(msg)
       }
       continue
     }
 
-    // stream_event or other
     continue
   }
 
@@ -181,15 +175,15 @@ function ActivityGroup({ group, toolResults }: {
     <div className="border border-border/50 rounded-md overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors"
+        className="w-full px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 text-left hover:bg-surface/50 transition-colors min-h-[44px]"
       >
-        <span className="text-xs text-foreground-muted select-none shrink-0">{expanded ? '▼' : '▶'}</span>
+        <span className="text-xs text-foreground-muted select-none shrink-0">{expanded ? '\u25BC' : '\u25B6'}</span>
         <span className="text-xs text-foreground-muted shrink-0">
           {count} op{count !== 1 ? 's' : ''}
         </span>
         {!expanded && group.toolSummaries && group.toolSummaries.length > 0 && (
           <span className="text-xs text-foreground-muted/60 truncate flex-1 font-mono min-w-0">
-            — {group.toolSummaries.slice(-3).join(', ')}
+            {group.toolSummaries.slice(-3).join(', ')}
           </span>
         )}
       </button>
@@ -235,14 +229,12 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     return lastStartIdx > lastEndIdx
   })()
 
-  // Extract complete SDK messages (non-streaming), including prepended history
   const allMessages = [...prependedMessages, ...ws.messages]
   const sdkMessages: SDKMessage[] = allMessages
     .filter((m): m is ServerMessage & { type: 'sdk_event' } => m.type === 'sdk_event')
     .map((m) => m.message as SDKMessage)
     .filter((m) => m.type !== 'stream_event')
 
-  // Build tool results map: tool_use_id -> { content, isError }
   const toolResults = useMemo(() => {
     const map = new Map<string, { content: string; isError: boolean }>()
     for (const msg of sdkMessages) {
@@ -269,10 +261,8 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     return map
   }, [sdkMessages])
 
-  // Group messages for display
   const displayGroups = useMemo(() => groupMessages(sdkMessages), [sdkMessages])
 
-  // Process streaming events
   const streamEvents = ws.messages
     .filter((m): m is ServerMessage & { type: 'sdk_event' } => m.type === 'sdk_event')
     .map((m) => m.message as SDKMessage)
@@ -286,7 +276,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamEvents.length])
 
-  // Reset stream accumulator when a complete assistant message arrives
   useEffect(() => {
     const lastMsg = sdkMessages[sdkMessages.length - 1]
     if (lastMsg?.type === 'assistant') {
@@ -295,7 +284,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdkMessages.length])
 
-  // Handle history_batch messages (initial metadata + load_previous responses)
   useEffect(() => {
     const batches = ws.messages.filter(
       (m): m is ServerMessage & { type: 'history_batch' } => m.type === 'history_batch'
@@ -304,7 +292,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     if (!lastBatch) return
 
     if (lastBatch.messages && lastBatch.messages.length > 0) {
-      // This is a load_previous response with actual messages
       const scrollEl = containerRef.current
       const prevScrollHeight = scrollEl?.scrollHeight || 0
 
@@ -315,7 +302,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
       }))
       setPrependedMessages((prev) => [...newMessages, ...prev])
 
-      // Preserve scroll position after prepend
       requestAnimationFrame(() => {
         if (scrollEl) {
           const newScrollHeight = scrollEl.scrollHeight
@@ -330,7 +316,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws.messages.filter((m) => m.type === 'history_batch').length])
 
-  // Scroll to bottom on initial load
   useEffect(() => {
     if (initialScrollDone) return
     if (sdkMessages.length === 0) return
@@ -350,7 +335,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     ws.loadPrevious(activeSessionId, historyCursor)
   }
 
-  // Auto-load previous messages when scrolling to the top
   const loadTriggerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const trigger = loadTriggerRef.current
@@ -370,23 +354,18 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyHasMore, historyLoading, historyCursor, activeSessionId])
 
-  // Detect project name from init message
   const initMessage = sdkMessages.find((m) => m.type === 'system' && 'subtype' in m && m.subtype === 'init')
   const displayProject = projectName || (initMessage && 'cwd' in initMessage ? String(initMessage.cwd).split('/').pop() : '')
 
-  // Auto-scroll
   const { containerRef, showScrollButton, scrollToBottom } = useAutoScroll(
     streamState.blocks.length + sdkMessages.length
   )
 
-  // Determine if we're still in initial loading
   const isLoading = loadingStatus && sdkMessages.length === 0 && streamState.blocks.length === 0
 
   const handleSend = () => {
     if (!input.trim() || !activeSessionId) return
     const text = input.trim()
-    // Track the message locally so it appears immediately in the chat
-    // Count current SDK user text messages so we know when the echo arrives
     const currentUserTextCount = sdkMessages.filter((sdk) => {
       if (sdk.type !== 'user') return false
       const content = sdk.message.content
@@ -410,10 +389,13 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
     }
   }
 
+  // Suppress unused var warning
+  void localUserMessages
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="border-b border-border px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shrink-0">
+      <header className="border-b border-border px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shrink-0 relative">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors text-sm shrink-0">
             &larr;<span className="hidden sm:inline"> Sessions</span>
@@ -440,14 +422,17 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={() => activeSessionId && ws.stopSession(activeSessionId)}
             disabled={!isRunning || !activeSessionId}
-            className="btn btn-destructive px-3 py-1 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Stop
-          </button>
+          </Button>
         </div>
+        {/* Header glow line */}
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-primary via-secondary to-primary opacity-30" />
       </header>
 
       {/* Messages area */}
@@ -466,7 +451,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           </div>
         ) : (
           <>
-            {/* Auto-load trigger for previous messages */}
             {historyHasMore && (
               <div ref={loadTriggerRef} className="flex justify-center py-2">
                 {historyLoading && (
@@ -479,21 +463,15 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               if (group.type === 'activity') {
                 return <ActivityGroup key={i} group={group} toolResults={toolResults} />
               }
-              // For non-activity groups, render each message directly
               return group.messages.map((msg, j) => (
                 <ChatMessage key={`${i}-${j}`} message={msg} toolResults={toolResults} />
               ))
             })}
 
-            {/* No local user messages rendered here. The SDK echoes them back
-                in the correct timeline position via displayGroups. */}
-
             {/* Streaming content */}
             {streamState.blocks.length > 0 && (
               <div className="flex gap-2 sm:gap-3 py-2">
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-xs font-bold shrink-0">
-                  C
-                </div>
+                <Avatar name="Claude" color="secondary" size="sm" />
                 <div className="flex-1 space-y-1 min-w-0 break-words">
                   {streamState.blocks.map((block, i) => (
                     <StreamingBlock key={i} block={block} />
@@ -502,7 +480,6 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
               </div>
             )}
 
-            {/* Show spinner when running but no new streaming content */}
             {isRunning && streamState.blocks.length === 0 && (
               <div className="flex items-center gap-2 py-2 text-foreground-muted text-xs">
                 <Spinner />
@@ -512,21 +489,22 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
           </>
         )}
 
-        {/* Scroll to bottom button */}
         {showScrollButton && (
           <div className="sticky bottom-3 flex justify-center pointer-events-none">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={scrollToBottom}
-              className="pointer-events-auto btn btn-outline px-3 py-1.5 text-xs shadow-lg bg-background border-border-light"
+              className="pointer-events-auto shadow-lg bg-background border-border-light"
             >
               &darr; Scroll to bottom
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
-      {/* Input area */}
-      <div className="border-t border-border px-2 sm:px-4 py-2 sm:py-3 shrink-0">
+      {/* Input area - fixed on mobile */}
+      <div className="border-t border-border px-2 sm:px-4 py-2 sm:py-3 shrink-0 bg-background">
         <div className="flex gap-2 max-w-4xl mx-auto">
           <textarea
             ref={inputRef}
@@ -536,15 +514,17 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
             placeholder={isRunning ? 'Wait for response...' : 'Send a follow-up prompt...'}
             disabled={!activeSessionId || isRunning}
             rows={1}
-            className="flex-1 bg-surface border border-border rounded-md px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none resize-none disabled:opacity-50"
+            className="flex-1 bg-surface border border-border rounded-md px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-50 min-h-[44px]"
           />
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={handleSend}
             disabled={!input.trim() || !activeSessionId || isRunning}
-            className="btn btn-primary px-3 sm:px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            className="shrink-0"
           >
             Send
-          </button>
+          </Button>
         </div>
       </div>
     </div>
