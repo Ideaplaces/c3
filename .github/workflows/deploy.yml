@@ -10,9 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  AZURE_WEBAPP_NAME: app-ideaplaces-c3
   ACR_LOGIN_SERVER: acrideaplaces.azurecr.io
   IMAGE_NAME: c3
+  AZURE_RESOURCE_GROUP: rg-ideaplaces
+  AZURE_CONTAINER_APP: c3-marketing
 
 jobs:
   build-and-deploy:
@@ -23,61 +24,57 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Login to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ env.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        run: |
-          docker build \
-            --build-arg NEXT_PUBLIC_BASE_URL=https://c3.ideaplaces.com \
-            --build-arg C3_MODE=marketing \
-            -t ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:prod-${{ github.sha }} \
-            -t ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest .
-          docker push ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:prod-${{ github.sha }}
-          docker push ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: Login to Azure
+      - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to production
+      - name: Log in to Azure Container Registry
         run: |
-          az webapp config container set \
-            --name ${{ env.AZURE_WEBAPP_NAME }} \
-            --resource-group rg-ideaplaces \
-            --container-image-name "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:prod-${{ github.sha }}" \
-            --container-registry-url "https://${{ env.ACR_LOGIN_SERVER }}" \
-            --container-registry-user "${{ secrets.ACR_USERNAME }}" \
-            --container-registry-password "${{ secrets.ACR_PASSWORD }}"
-          echo "Container config updated, waiting for restart..."
+          az acr login --name acrideaplaces
 
-      - name: Wait for production to be healthy
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_BASE_URL=https://c3.ideaplaces.com
+            C3_MODE=marketing
+          cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Deploy new revision
         run: |
-          PROD_URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
+          az containerapp update \
+            --name ${{ env.AZURE_CONTAINER_APP }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-          echo "Waiting for container restart..."
-          sleep 20
-
-          echo "Polling until new container is healthy..."
-          SEEN_DOWN=false
-          for i in $(seq 1 60); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL" --max-time 5 2>/dev/null || echo "000")
+      - name: Wait for deployment to be healthy
+        run: |
+          FQDN=$(az containerapp show \
+            --name ${{ env.AZURE_CONTAINER_APP }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          HEALTH_URL="https://${FQDN}/api/health"
+          echo "Health check: $HEALTH_URL"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" --max-time 5 2>/dev/null || echo "000")
             if [ "$STATUS" = "200" ]; then
-              if [ "$SEEN_DOWN" = true ] || [ "$i" -gt 5 ]; then
-                echo "Production healthy after ${i} attempts"
-                exit 0
-              fi
-              echo "Attempt $i: still seeing old container (HTTP $STATUS), waiting..."
-            else
-              SEEN_DOWN=true
-              echo "Attempt $i: container restarting (HTTP $STATUS)..."
+              echo "Healthy after ${i} attempts"
+              exit 0
             fi
+            echo "Attempt $i: HTTP $STATUS, waiting..."
             sleep 5
           done
-          echo "Production failed to become healthy after 5 minutes"
+          echo "Failed to become healthy after 150 seconds"
           exit 1
