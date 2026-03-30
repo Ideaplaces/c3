@@ -18,6 +18,7 @@
     "discord.js": "^14.25.1",
     "jsonwebtoken": "^9.0.2",
     "next": "^15.1.4",
+    "posthog-js": "^1.364.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.3",
