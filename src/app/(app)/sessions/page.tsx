@@ -60,10 +60,10 @@ export default function SessionsPage() {
       {/* Header */}
       <header className="border-b border-border px-4 sm:px-6 py-3 sm:py-4 relative">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <a href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             <Logo size={32} />
             <span className="text-foreground-muted text-sm hidden sm:inline">Cloud Claude Code</span>
-          </div>
+          </a>
           <div className="flex items-center gap-2 sm:gap-4">
             {user && (
               <span className="text-sm text-foreground-muted hidden sm:inline">{user.name}</span>

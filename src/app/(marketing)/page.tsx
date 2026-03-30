@@ -84,76 +84,13 @@ function MockActivityGroup() {
 
 function ArchitectureDiagram() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 sm:gap-4 items-center">
-      {/* Your Device */}
-      <div className="bg-card border border-border rounded-lg p-4 text-center">
-        <div className="text-2xl mb-2">&#x1F4F1;</div>
-        <div className="text-sm font-semibold">Your Device</div>
-        <div className="text-xs text-foreground-muted">Any browser</div>
-      </div>
-
-      {/* Arrow */}
-      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
-        <div className="text-xs text-foreground-muted text-center">WebSocket</div>
-        <div className="w-full h-px bg-gradient-to-r from-primary to-secondary" />
-        <div className="text-xs text-foreground-muted text-center">Stream</div>
-      </div>
-      <div className="sm:hidden flex justify-center">
-        <div className="w-px h-6 bg-gradient-to-b from-primary to-secondary" />
-      </div>
-
-      {/* C3 Server */}
-      <div className="bg-card border-2 border-primary/40 rounded-lg p-4 text-center shadow-glow-primary">
-        <div className="mb-2"><Logo size={40} /></div>
-        <div className="text-sm font-semibold">C3 Server</div>
-        <div className="text-xs text-foreground-muted">Next.js + WebSocket</div>
-      </div>
-
-      {/* Arrow */}
-      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
-        <div className="text-xs text-foreground-muted text-center">Agent SDK</div>
-        <div className="w-full h-px bg-gradient-to-r from-secondary to-accent" />
-        <div className="text-xs text-foreground-muted text-center">Events</div>
-      </div>
-      <div className="sm:hidden flex justify-center">
-        <div className="w-px h-6 bg-gradient-to-b from-secondary to-accent" />
-      </div>
-
-      {/* Claude Code */}
-      <div className="bg-card border border-secondary/40 rounded-lg p-4 text-center">
-        <div className="text-2xl mb-2">&#x1F916;</div>
-        <div className="text-sm font-semibold">Claude Code</div>
-        <div className="text-xs text-foreground-muted">Agent SDK</div>
-      </div>
-
-      {/* Arrow */}
-      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
-        <div className="text-xs text-foreground-muted text-center">Read / Edit</div>
-        <div className="w-full h-px bg-gradient-to-r from-accent to-success" />
-        <div className="text-xs text-foreground-muted text-center">Run tests</div>
-      </div>
-      <div className="sm:hidden flex justify-center">
-        <div className="w-px h-6 bg-gradient-to-b from-accent to-success" />
-      </div>
-
-      {/* Your Codebase */}
-      <div className="bg-card border border-border rounded-lg p-4 text-center">
-        <div className="text-2xl mb-2">&#x1F4C1;</div>
-        <div className="text-sm font-semibold">Your Codebase</div>
-        <div className="text-xs text-foreground-muted">Local files</div>
-      </div>
-
-      {/* Trigger row */}
-      <div className="sm:col-span-4 mt-4 flex items-center justify-center gap-3 bg-card border border-border/50 rounded-lg p-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">&#x1F4AC;</span>
-          <span className="text-xs text-foreground-muted">Discord / Slack</span>
-        </div>
-        <div className="w-12 h-px bg-gradient-to-r from-warning to-primary" />
-        <span className="text-xs text-foreground-muted">trigger message</span>
-        <div className="w-12 h-px bg-gradient-to-r from-primary to-secondary" />
-        <span className="text-xs font-semibold">C3 auto-starts a headless session</span>
-      </div>
+    <div className="w-full overflow-x-auto">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/c3-architecture.svg"
+        alt="C3 Architecture: Slack/Discord alert triggers C3, which auto-starts a Claude Code session that investigates, fixes, and reports back. You monitor from your browser."
+        className="w-full max-w-[900px] mx-auto"
+      />
     </div>
   )
 }
