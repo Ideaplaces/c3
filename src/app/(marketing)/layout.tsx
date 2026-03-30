@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Logo } from '@/components/ui/Logo'
 import { PostHogProvider } from './posthog-provider'
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
@@ -10,8 +11,8 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       {/* Nav */}
       <nav className="border-b border-border px-4 sm:px-8 py-4 relative">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold font-heading">
-            <span className="text-gradient">C3</span>
+          <Link href="/" className="flex items-center">
+            <Logo size={36} />
           </Link>
           <div className="flex items-center gap-4 sm:gap-6">
             <Link href="/docs" className="text-sm text-foreground-muted hover:text-foreground transition-colors hidden sm:inline">

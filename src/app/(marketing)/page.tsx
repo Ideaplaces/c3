@@ -4,6 +4,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Logo } from '@/components/ui/Logo'
 
 function DemoLabel() {
   return (
@@ -103,7 +104,7 @@ function ArchitectureDiagram() {
 
       {/* C3 Server */}
       <div className="bg-card border-2 border-primary/40 rounded-lg p-4 text-center shadow-glow-primary">
-        <div className="text-2xl mb-2 text-gradient font-bold">C3</div>
+        <div className="mb-2"><Logo size={40} /></div>
         <div className="text-sm font-semibold">C3 Server</div>
         <div className="text-xs text-foreground-muted">Next.js + WebSocket</div>
       </div>
@@ -163,9 +164,9 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="px-4 sm:px-8 py-16 sm:py-24">
         <div className="max-w-4xl mx-auto text-center">
-          <h1 className="text-5xl sm:text-7xl font-bold font-heading mb-6">
-            <span className="text-gradient">C3</span>
-          </h1>
+          <div className="flex justify-center mb-6">
+            <Logo size={96} />
+          </div>
           <p className="text-xl sm:text-2xl text-foreground-muted mb-4 font-heading">
             Cloud Claude Code
           </p>
@@ -195,7 +196,7 @@ export default function LandingPage() {
             <DemoLabel />
             <div className="border-b border-border px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="text-xl font-bold font-heading text-gradient">C3</span>
+                <Logo size={28} />
                 <span className="text-foreground-muted text-sm hidden sm:inline">Cloud Claude Code</span>
               </div>
               <Button variant="primary" size="sm">+ New Session</Button>

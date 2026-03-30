@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
+import { Logo } from '@/components/ui/Logo'
 
 function LoginContent() {
   const searchParams = useSearchParams()
@@ -31,9 +32,9 @@ function LoginContent() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="p-6 sm:p-8 w-full max-w-md text-center">
-        <h1 className="text-3xl font-bold mb-2 font-heading">
-          <span className="text-gradient">C3</span>
-        </h1>
+        <div className="flex justify-center mb-2">
+          <Logo size={64} />
+        </div>
         <p className="text-foreground-muted mb-8">
           Cloud Claude Code
         </p>

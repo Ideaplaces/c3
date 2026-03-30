@@ -6,6 +6,7 @@ import type { SessionMeta } from '@/lib/store/types'
 import { SessionsTable } from '@/components/SessionsTable'
 import { NewSessionDialog } from '@/components/NewSessionDialog'
 import { Button } from '@/components/ui/Button'
+import { Logo } from '@/components/ui/Logo'
 
 export default function SessionsPage() {
   const router = useRouter()
@@ -60,9 +61,7 @@ export default function SessionsPage() {
       <header className="border-b border-border px-4 sm:px-6 py-3 sm:py-4 relative">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold font-heading">
-              <span className="text-gradient">C3</span>
-            </h1>
+            <Logo size={32} />
             <span className="text-foreground-muted text-sm hidden sm:inline">Cloud Claude Code</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
