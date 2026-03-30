@@ -61,7 +61,7 @@ export default function SessionsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold font-heading">
-              <span className="text-gradient">CCC</span>
+              <span className="text-gradient">C3</span>
             </h1>
             <span className="text-foreground-muted text-sm hidden sm:inline">Cloud Claude Code</span>
           </div>

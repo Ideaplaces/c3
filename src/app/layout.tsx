@@ -7,8 +7,16 @@ const montserrat = Montserrat({ subsets: ['latin'], weight: ['400', '500', '700'
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500', '700'], variable: '--font-jetbrains' })
 
 export const metadata: Metadata = {
-  title: 'Cloud Claude Code',
-  description: 'Claude Code in the browser — accessible from any device',
+  title: 'C3 — Claude Code, from any browser',
+  description: 'Remote Claude Code sessions and autonomous agents triggered by Discord and Slack. Open source.',
+  icons: {
+    icon: '/favicon.svg',
+  },
+  openGraph: {
+    title: 'C3 — Claude Code, from any browser',
+    description: 'Remote Claude Code sessions and autonomous agents triggered by Discord and Slack. Open source.',
+    siteName: 'C3',
+  },
 }
 
 export default function RootLayout({
