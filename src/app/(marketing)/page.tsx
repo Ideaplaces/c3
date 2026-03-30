@@ -5,6 +5,14 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/StatusBadge'
 
+function DemoLabel() {
+  return (
+    <div className="absolute top-3 right-3 bg-primary/10 border border-primary/20 text-primary text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider z-10">
+      Demo
+    </div>
+  )
+}
+
 function MockSessionCard({ project, status, prompt, time, turns, cost }: {
   project: string
   status: 'running' | 'idle' | 'completed' | 'error'
@@ -21,36 +29,21 @@ function MockSessionCard({ project, status, prompt, time, turns, cost }: {
   }[status]
 
   return (
-    <div className={`border border-border rounded-lg border-l-4 ${borderColor} px-4 py-3 hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer`}>
+    <div className={`border border-border rounded-lg border-l-4 ${borderColor} px-4 py-3 transition-all`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-medium font-mono text-sm">{project}</span>
             <StatusBadge status={status} />
             <span className="text-foreground-muted/60 text-xs">{time}</span>
           </div>
           <div className="text-sm text-foreground line-clamp-1">{prompt}</div>
         </div>
-        <div className="flex items-center gap-4 shrink-0 text-xs text-foreground-muted pt-1">
+        <div className="hidden sm:flex items-center gap-4 shrink-0 text-xs text-foreground-muted pt-1">
           <span>{turns} turns</span>
           <span>{cost}</span>
           <span className="text-foreground-muted/40">&rarr;</span>
         </div>
-      </div>
-    </div>
-  )
-}
-
-function MockChatMessage({ role, content }: { role: 'user' | 'assistant'; content: string }) {
-  return (
-    <div className="flex gap-3 py-2">
-      <Avatar
-        name={role === 'user' ? 'User' : 'Claude'}
-        color={role === 'user' ? 'primary' : 'secondary'}
-        size="sm"
-      />
-      <div className="flex-1 text-sm whitespace-pre-wrap min-w-0">
-        {content}
       </div>
     </div>
   )
@@ -75,13 +68,90 @@ function MockActivityGroup() {
     <div className="border border-border/50 rounded-md overflow-hidden">
       <div className="px-3 py-2 flex items-center gap-2">
         <span className="text-xs text-foreground-muted select-none">&#x25BC;</span>
-        <span className="text-xs text-foreground-muted">4 ops</span>
+        <span className="text-xs text-foreground-muted">5 ops</span>
       </div>
       <div className="border-t border-border/50 px-2 py-1 space-y-1">
-        <MockToolCall icon="&#x1F4C4;" summary="Read src/lib/auth/session.ts" />
-        <MockToolCall icon="&#x1F50D;" summary='Grep "validateToken" in src/' />
-        <MockToolCall icon="&#x270F;&#xFE0F;" summary="Edit src/lib/auth/session.ts" />
-        <MockToolCall icon="$" summary="npm run test:unit" />
+        <MockToolCall icon="&#x1F50D;" summary='Grep "handleWebhook" in src/api/' />
+        <MockToolCall icon="&#x1F4C4;" summary="Read src/api/webhooks/handler.ts" />
+        <MockToolCall icon="&#x1F4C4;" summary="Read src/lib/crypto/verify.ts" />
+        <MockToolCall icon="&#x270F;&#xFE0F;" summary="Edit src/lib/crypto/verify.ts" />
+        <MockToolCall icon="$" summary="npm run test -- --grep webhook" />
+      </div>
+    </div>
+  )
+}
+
+function ArchitectureDiagram() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 sm:gap-4 items-center">
+      {/* Your Device */}
+      <div className="bg-card border border-border rounded-lg p-4 text-center">
+        <div className="text-2xl mb-2">&#x1F4F1;</div>
+        <div className="text-sm font-semibold">Your Device</div>
+        <div className="text-xs text-foreground-muted">Any browser</div>
+      </div>
+
+      {/* Arrow */}
+      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
+        <div className="text-xs text-foreground-muted text-center">WebSocket</div>
+        <div className="w-full h-px bg-gradient-to-r from-primary to-secondary" />
+        <div className="text-xs text-foreground-muted text-center">Stream</div>
+      </div>
+      <div className="sm:hidden flex justify-center">
+        <div className="w-px h-6 bg-gradient-to-b from-primary to-secondary" />
+      </div>
+
+      {/* C3 Server */}
+      <div className="bg-card border-2 border-primary/40 rounded-lg p-4 text-center shadow-glow-primary">
+        <div className="text-2xl mb-2 text-gradient font-bold">C3</div>
+        <div className="text-sm font-semibold">C3 Server</div>
+        <div className="text-xs text-foreground-muted">Next.js + WebSocket</div>
+      </div>
+
+      {/* Arrow */}
+      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
+        <div className="text-xs text-foreground-muted text-center">Agent SDK</div>
+        <div className="w-full h-px bg-gradient-to-r from-secondary to-accent" />
+        <div className="text-xs text-foreground-muted text-center">Events</div>
+      </div>
+      <div className="sm:hidden flex justify-center">
+        <div className="w-px h-6 bg-gradient-to-b from-secondary to-accent" />
+      </div>
+
+      {/* Claude Code */}
+      <div className="bg-card border border-secondary/40 rounded-lg p-4 text-center">
+        <div className="text-2xl mb-2">&#x1F916;</div>
+        <div className="text-sm font-semibold">Claude Code</div>
+        <div className="text-xs text-foreground-muted">Agent SDK</div>
+      </div>
+
+      {/* Arrow */}
+      <div className="hidden sm:flex flex-col items-center gap-1 -mx-2">
+        <div className="text-xs text-foreground-muted text-center">Read / Edit</div>
+        <div className="w-full h-px bg-gradient-to-r from-accent to-success" />
+        <div className="text-xs text-foreground-muted text-center">Run tests</div>
+      </div>
+      <div className="sm:hidden flex justify-center">
+        <div className="w-px h-6 bg-gradient-to-b from-accent to-success" />
+      </div>
+
+      {/* Your Codebase */}
+      <div className="bg-card border border-border rounded-lg p-4 text-center">
+        <div className="text-2xl mb-2">&#x1F4C1;</div>
+        <div className="text-sm font-semibold">Your Codebase</div>
+        <div className="text-xs text-foreground-muted">Local files</div>
+      </div>
+
+      {/* Trigger row */}
+      <div className="sm:col-span-4 mt-4 flex items-center justify-center gap-3 bg-card border border-border/50 rounded-lg p-3">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">&#x1F4AC;</span>
+          <span className="text-xs text-foreground-muted">Discord / Slack</span>
+        </div>
+        <div className="w-12 h-px bg-gradient-to-r from-warning to-primary" />
+        <span className="text-xs text-foreground-muted">trigger message</span>
+        <div className="w-12 h-px bg-gradient-to-r from-primary to-secondary" />
+        <span className="text-xs font-semibold">C3 auto-starts a headless session</span>
       </div>
     </div>
   )
@@ -121,9 +191,8 @@ export default function LandingPage() {
             Every session is visible in one place. Agents that ran overnight, debugging sessions from your phone, all in one list.
           </p>
 
-          {/* Mock sessions list */}
-          <Card className="p-0 overflow-hidden">
-            {/* Mock header */}
+          <Card className="p-0 overflow-hidden relative">
+            <DemoLabel />
             <div className="border-b border-border px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-xl font-bold font-heading text-gradient">C3</span>
@@ -133,9 +202,9 @@ export default function LandingPage() {
             </div>
             <div className="p-3 space-y-2">
               <MockSessionCard
-                project="mentorly-backend"
+                project="pulse-api"
                 status="running"
-                prompt="Investigate the recurring production error on /api/sessions endpoint and fix the root cause"
+                prompt="Investigate the spike in /api/metrics latency and optimize the aggregation query"
                 time="2m ago"
                 turns={12}
                 cost="$0.43"
@@ -149,17 +218,17 @@ export default function LandingPage() {
                 cost="$0.12"
               />
               <MockSessionCard
-                project="monday2github"
+                project="nexus-app"
                 status="completed"
-                prompt="Fix the webhook signature validation failing on large payloads"
+                prompt="Fix the webhook signature validation failing on large payloads over 1MB"
                 time="3h ago"
                 turns={15}
                 cost="$0.67"
               />
               <MockSessionCard
-                project="ideaplaces-docs"
+                project="orbit-docs"
                 status="error"
-                prompt="Migrate search from Algolia to local vector embeddings"
+                prompt="Migrate search from Algolia to local vector embeddings with pgvector"
                 time="5h ago"
                 turns={23}
                 cost="$1.04"
@@ -210,12 +279,13 @@ export default function LandingPage() {
             C3 streams Claude Code's full output: thinking, tool calls, file edits, test results. Everything you'd see in the terminal.
           </p>
 
-          <Card className="p-0 overflow-hidden">
+          <Card className="p-0 overflow-hidden relative">
+            <DemoLabel />
             {/* Mock session header */}
             <div className="border-b border-border px-4 py-2.5 flex items-center justify-between relative">
               <div className="flex items-center gap-3">
                 <span className="text-foreground-muted text-sm">&larr; Sessions</span>
-                <span className="font-medium font-mono text-sm">mentorly-backend</span>
+                <span className="font-medium font-mono text-sm">pulse-api</span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded font-mono text-info bg-info/10">bypass</span>
                 <span className="inline-flex items-center gap-1.5 text-xs text-info">
                   <StatusDot status="running" />
@@ -227,22 +297,28 @@ export default function LandingPage() {
             </div>
 
             {/* Mock chat */}
-            <div className="px-4 py-4 space-y-3 max-h-[400px] overflow-hidden">
-              <MockChatMessage
-                role="user"
-                content="Investigate the recurring production error on /api/sessions endpoint and fix the root cause"
-              />
+            <div className="px-4 py-4 space-y-3">
+              <div className="flex gap-3 py-2">
+                <Avatar name="User" color="primary" size="sm" />
+                <div className="flex-1 text-sm min-w-0">
+                  Investigate the spike in /api/metrics latency and optimize the aggregation query
+                </div>
+              </div>
 
               <MockActivityGroup />
 
-              <MockChatMessage
-                role="assistant"
-                content={`The root cause is a race condition in the session validation middleware. When two requests arrive simultaneously for the same session, the token refresh logic can overwrite a valid token with an expired one.
-
-I've fixed this by adding a mutex lock around the token refresh and adding a staleness check before writing. The fix is in \`src/lib/auth/session.ts\`.
-
-Tests pass. The key change: validateToken() now checks the token's updatedAt timestamp before refreshing, preventing the overwrite.`}
-              />
+              <div className="flex gap-3 py-2">
+                <Avatar name="Claude" color="secondary" size="sm" />
+                <div className="flex-1 text-sm min-w-0 space-y-3">
+                  <p>Found the issue. The <code className="bg-surface border border-border rounded px-1.5 py-0.5 text-xs font-mono">aggregateMetrics()</code> function runs a full table scan on every request because the <code className="bg-surface border border-border rounded px-1.5 py-0.5 text-xs font-mono">created_at</code> index was dropped in the last migration.</p>
+                  <p>Two changes made:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-foreground-muted">
+                    <li>Restored the composite index on <code className="bg-surface border border-border rounded px-1.5 py-0.5 text-xs font-mono">(created_at, metric_type)</code></li>
+                    <li>Added a 5 minute cache with stale-while-revalidate for the aggregation endpoint</li>
+                  </ol>
+                  <p>Query time dropped from ~1200ms to ~8ms. All tests pass.</p>
+                </div>
+              </div>
 
               <div className="text-xs py-1.5 px-3 rounded border inline-block bg-success/10 border-success/30 text-success">
                 Done &middot; 12 turns &middot; $0.43
@@ -266,22 +342,7 @@ Tests pass. The key change: validateToken() now checks the token's updatedAt tim
       <section className="px-4 sm:px-8 py-16">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-2xl sm:text-3xl font-bold font-heading text-center mb-12">How It Works</h2>
-          <div className="bg-card border border-border rounded-lg p-6 sm:p-8 font-mono text-xs sm:text-sm overflow-x-auto">
-            <pre className="text-foreground-muted leading-relaxed whitespace-pre">
-{`Your Device         C3 Server           Claude Code SDK       Your Codebase
-  (browser)       (Next.js + WS)       (Agent SDK)           (local files)
-     |                 |                     |                     |
-     |--- WebSocket -->|                     |                     |
-     |    "fix bug"    |--- spawn session -->|                     |
-     |                 |                     |--- read/edit ------>|
-     |                 |                     |--- run tests ------>|
-     |<-- stream ------|<-- SDK events ------|                     |
-     |    results      |                     |                     |
-
-  Discord/Slack ------>|
-    trigger msg        |--- auto-start session (headless) ------->|`}
-            </pre>
-          </div>
+          <ArchitectureDiagram />
         </div>
       </section>
 
