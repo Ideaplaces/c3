@@ -335,11 +335,35 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-2xl sm:text-3xl font-bold font-heading mb-4">Open Source</h2>
           <p className="text-foreground-muted mb-8 text-lg">
-            Fork it. Customize it. The landing page comes with it.
+            Apache 2.0. Fork it. Customize it. The landing page comes with it.
           </p>
           <a href="https://github.com/Ideaplaces/c3" target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="lg">View on GitHub</Button>
           </a>
+        </div>
+      </section>
+
+      {/* Built By */}
+      <section className="px-4 sm:px-8 py-12">
+        <div className="max-w-2xl mx-auto text-center">
+          <p className="text-sm text-foreground-muted mb-1">Built by</p>
+          <a
+            href="https://github.com/crarau"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
+          >
+            Ciprian Rarau
+          </a>
+          <p className="text-sm text-foreground-muted mt-1">
+            at{' '}
+            <a href="https://ideaplaces.com" className="text-primary hover:underline">IdeaPlaces</a>
+          </p>
+          <div className="flex justify-center gap-4 mt-3 text-sm text-foreground-muted">
+            <a href="https://github.com/crarau" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">GitHub</a>
+            <a href="https://ciprianrarau.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Blog</a>
+            <a href="https://linkedin.com/in/ciprianrarau" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">LinkedIn</a>
+          </div>
         </div>
       </section>
     </div>
