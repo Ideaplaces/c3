@@ -1,94 +1,79 @@
 # C3 - Cloud Claude Code
 
-Access Claude Code from any browser. Start autonomous agents from Discord or Slack. Continue conversations from your phone.
+**An AI agent that runs on your dev machine, watches your channels, and does your work while you sleep.**
 
-## What It Does
+## The Premise
 
-1. **Remote sessions** - Run Claude Code on your machine, pilot from any device
-2. **Autonomous triggers** - Messages in Discord/Slack channels start headless Claude Code sessions
-3. **Conversation continuity** - Resume any session from any device, including agent-started ones
+You have a machine where you write code. A VM, a server, a Mac Mini in a closet. That machine has your repos, your secrets, your CLI tools, your database access. You SSH into it and run Claude Code.
 
-The agent investigates at 3am. You open C3 at 9am, read the findings, type "create a PR for this fix," and the agent continues with full context.
+C3 turns that machine into an autonomous agent platform.
 
-## Quick Start
+Instead of you sitting at the terminal typing prompts, C3 listens to your Slack and Discord channels. When an alert fires, a bug is reported, or someone asks a question, C3 starts a Claude Code session on YOUR machine, with YOUR repos, with YOUR access. The agent reads your code, runs your tests, checks your logs, creates PRs. Then it reports back in the channel thread.
+
+You wake up, read the thread, click a link, and continue the conversation from your phone.
+
+**This is not a cloud-hosted agent.** It runs where your code lives. That's what makes it powerful: it has the same context you do.
+
+## What You Need
+
+```
+┌─────────────────────────────────────────────────────────┐
+│           Your Always-On Dev Machine                     │
+│           (cloud VM, homelab, Mac Mini, etc.)            │
+│                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │ Claude Code  │  │ Your Repos   │  │ Your Secrets  │  │
+│  │ CLI (auth'd) │  │ (git, code)  │  │ (keys, tokens)│  │
+│  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘  │
+│         │                 │                   │          │
+│         └────────┬────────┘───────────────────┘          │
+│                  │                                       │
+│           ┌──────┴──────┐                                │
+│           │     C3      │ ← Slack/Discord messages in    │
+│           │  (Next.js)  │ → Investigation reports out    │
+│           └──────┬──────┘                                │
+│                  │                                       │
+│           ┌──────┴──────┐                                │
+│           │   Tunnel    │  (Cloudflare, ngrok, Tailscale)│
+│           └──────┬──────┘                                │
+│                  │                                       │
+└──────────────────┼───────────────────────────────────────┘
+                   │
+            ┌──────┴──────┐
+            │  Internet   │
+            │  (browser,  │
+            │   phone)    │
+            └─────────────┘
+```
+
+1. **A machine that's always on.** This is where your code lives. Cloud VM, homelab server, old laptop. It needs to be running 24/7.
+2. **Claude Code CLI installed and authenticated.** Claude Max subscription (fixed cost) or API key.
+3. **C3 installed on that machine.** It's a Next.js app that wraps the Claude Code SDK.
+4. **A tunnel** to access it from outside. Cloudflare Tunnel (free), ngrok, or Tailscale.
+5. **Slack/Discord bot tokens** for the channels you want to watch.
+
+## The Setup (Once)
 
 ```bash
-git clone https://github.com/user/c3
+# On your always-on machine:
+git clone https://github.com/Ideaplaces/c3
 cd c3
 npm install
-cp .env.example .env.local    # Edit with your values
+cp .env.example .env.local    # Add your tokens
 npm run build
-npm start                      # http://localhost:8347
+npx pm2 start ecosystem.config.cjs
 ```
 
-## Requirements
-
-- **Node.js 20+**
-- **Claude Code CLI** installed and authenticated (`npm install -g @anthropic-ai/claude-code && claude`)
-- **Claude Max subscription** (recommended) or Anthropic API key
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    Your Machine                      │
-│                                                      │
-│  Discord Bot ─┐                                      │
-│               ├─→ C3 Server ─→ SessionManager        │
-│  Slack Poller ┘   (port 8347)   (Claude SDK)         │
-│                       ↑                ↓             │
-│                    Browser         Your Repos         │
-│                  (any device)                         │
-└─────────────────────────────────────────────────────┘
-```
-
-C3 runs on the machine where your code lives. It uses the Claude Code SDK to create sessions programmatically. The browser connects via WebSocket for real-time streaming.
-
-## Authentication
-
-Three options:
-
-| Method | Setup | Use Case |
-|--------|-------|----------|
-| **Magic link** | Set `RESEND_API_KEY` + `C3_FROM_EMAIL` | Production (email sign-in link) |
-| **Password** | Set `C3_LOGIN_PASSWORD` | Quick remote access |
-| **None** | Dev mode (default on localhost) | Local development |
-
-## Triggers
-
-Triggers let Discord/Slack messages start Claude Code sessions automatically.
-
-### Setup
-
-1. Create `~/.c3/triggers.json` (see `triggers.example.json`)
-2. Write prompt templates in `~/.c3/prompts/`
-3. Start the listener:
-
-```bash
-npx pm2 start ecosystem.config.cjs   # Starts C3 + Discord bot + Slack poller
-```
-
-### How triggers work
-
-1. A message appears in a configured channel (e.g., a production error alert)
-2. The poller/bot forwards it to C3's webhook endpoint
-3. C3 loads the prompt template, injects the message content
-4. `sessionManager.startSession()` spawns a headless Claude Code agent
-5. **C3 immediately replies in the thread** with "Session started" and a live browser link, so you can jump in and watch from your phone
-6. The agent runs autonomously (reads files, runs commands, creates PRs)
-7. On completion, C3 replies in the channel thread with a structured report (root cause, severity, action taken, recommendation)
-8. You can continue the conversation in the browser or via CLI: `claude --resume SESSION_ID`
-
-### Example: Production alert monitoring
+Then create `~/.c3/triggers.json` to tell C3 which channels to watch and what to do:
 
 ```json
 {
   "slack": {
-    "alerts-backend-prod": {
-      "name": "alerts-backend-prod",
+    "alerts-prod": {
+      "name": "alerts-prod",
       "channelId": "C0ABC123",
       "prompt": "investigate-error.md",
-      "projectPath": "~/my-backend",
+      "projectPath": "~/my-project",
       "permissionMode": "bypassPermissions",
       "model": "claude-sonnet-4-6",
       "pollIntervalMs": 15000
@@ -97,63 +82,102 @@ npx pm2 start ecosystem.config.cjs   # Starts C3 + Discord bot + Slack poller
 }
 ```
 
-When an alert fires in `#alerts-backend-prod`, C3 starts a session in `~/my-backend`, runs the investigation playbook, and replies in the Slack thread.
+Write a prompt template in `~/.c3/prompts/investigate-error.md` that tells the agent what to do when an alert fires.
+
+That's it. C3 is now watching your channel.
+
+## What Happens When an Alert Fires
+
+```
+1. 3:00 AM  Alert appears in #alerts-prod
+2. 3:00 AM  C3 picks it up, adds 👀 reaction
+3. 3:00 AM  C3 replies in thread: "Session started. Watch live: https://..."
+4. 3:00 AM  Agent starts investigating (reads code, checks logs, traces errors)
+5. 3:12 AM  Agent creates a PR with the fix
+6. 3:12 AM  C3 replies in thread with findings + PR link + resume command
+7. 9:00 AM  You read the thread on your phone
+8. 9:01 AM  You click the link, see the full session, type "also check staging"
+9. 9:01 AM  Agent continues with full context from the 3 AM investigation
+```
+
+The key: step 9. This is not fire-and-forget. Every triggered session is a full Claude Code conversation you can continue.
+
+## Why It Runs on Your Machine
+
+Other AI tools run in the cloud. They can read your code (if you give them access), but they can't:
+
+- Run `git blame` on your repo
+- Query your production database
+- Check your Azure/AWS logs with your CLI credentials
+- Run your test suite
+- Create branches and push to your GitHub
+- Access your private npm packages
+- Read your `.env` files and CLAUDE.md context
+
+C3 can do all of this because it runs where you work. It's not a sandboxed agent with limited access. It's Claude Code with the same permissions you have.
+
+## Who This Is For
+
+Developers who:
+- Already run Claude Code on a remote machine (VM, server)
+- Want their AI to keep working when they close the laptop
+- Have Slack/Discord channels with alerts they want auto-investigated
+- Are comfortable with SSH, pm2, and setting up a tunnel
+
+This is not a consumer product. It's infrastructure for developers who want to multiply their attention.
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Slack/Discord triggers** | Channel messages start headless Claude Code sessions |
+| **Live streaming** | Watch the agent work in real-time from your browser |
+| **Conversation continuity** | Resume any session from browser or CLI (`claude --resume ID`) |
+| **Prompt templates** | Structured playbooks with `{{variables}}` for different use cases |
+| **Loop prevention** | Eyes reaction + rate limiting + in-thread replies (unit tested) |
+| **Magic link auth** | Email sign-in, no Google OAuth dependency |
+| **Per-user config** | Triggers and prompts in `~/.c3/`, separate from the tool |
 
 ## Prompt Templates
 
-Prompts are markdown files with `{{variable}}` placeholders:
+The prompt is the product. Everything else is plumbing.
+
+A prompt template is a markdown file that tells the agent what to do. It gets the channel message injected as context:
 
 ```markdown
 # Error Investigation
 
-An error was reported in #{{channel}}.
-
-## Alert
+Alert from #{{channel}} by {{author}}:
 {{message}}
 
 ## Your Task
 1. Find the error in the codebase
-2. Identify the root cause
-3. Create a fix if safe to do so
+2. Check recent commits for the cause
+3. If safe to fix, create a PR targeting develop
+4. Report your findings
 ```
 
 Available variables: `{{message}}`, `{{author}}`, `{{channel}}`, `{{timestamp}}`
 
+Good prompts are 200+ lines. They encode your expertise: which files to check, which commands to run, when to auto-fix vs. flag for review.
+
 ## Remote Access
 
-C3 runs on localhost by default. To access from other devices, you need a tunnel:
+C3 runs on localhost:8347 by default. To access from other devices:
 
 | Option | Setup |
 |--------|-------|
-| **Cloudflare Tunnel** | `cloudflared service install <token>` (free, production-grade) |
-| **ngrok** | `ngrok http 8347` (quick testing) |
-| **Tailscale** | Already on your tailnet (zero config) |
-
-Set `C3_BASE_URL` and `NEXT_PUBLIC_BASE_URL` to your public URL after setting up the tunnel.
-
-## Configuration
-
-All configuration is in `.env.local`. See `.env.example` for all available options.
-
-Trigger configs and prompts live in `~/.c3/`:
-
-```
-~/.c3/
-  triggers.json       # Channel-to-agent mappings
-  prompts/
-    investigate-error.md
-    review-pr.md
-    your-custom-prompt.md
-```
+| **Cloudflare Tunnel** | Free, production-grade. `sudo cloudflared service install <token>` |
+| **ngrok** | Quick testing. `ngrok http 8347` |
+| **Tailscale** | Zero config if already on your tailnet |
 
 ## Process Management
 
 ```bash
-npx pm2 start ecosystem.config.cjs    # Start all services
+npx pm2 start ecosystem.config.cjs    # Start all (C3 + Discord bot + Slack poller)
 npx pm2 list                           # Status
-npx pm2 logs ccc                       # C3 server logs
-npx pm2 logs ccc-slack-poller          # Slack poller logs
-npx pm2 restart ccc                    # Restart after config change
+npx pm2 logs c3                        # Server logs
+npx pm2 restart c3                     # Restart after changes
 npx pm2 save                           # Persist across reboots
 ```
 
