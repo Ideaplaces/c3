@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "next build",
+    "build": "vitest run && next build",
     "start": "NODE_ENV=production tsx server.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
