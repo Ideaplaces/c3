@@ -89,6 +89,7 @@ function saveState(state: PollerState) {
 import {
   filterCandidates,
   shouldProcessMessage,
+  extractFullText,
   PROCESSED_REACTION,
   type SlackMessage,
 } from './src/lib/slack-poller/logic.js'
@@ -200,7 +201,9 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       }
     }
 
-    console.log(`[Slack Poller] Processing message from ${author}: ${msg.text.slice(0, 100)}...`)
+    // Extract full message content (blocks + attachments, not just truncated text)
+    const fullMessage = extractFullText(msg)
+    console.log(`[Slack Poller] Processing message from ${author} (${fullMessage.length} chars): ${fullMessage.slice(0, 100)}...`)
 
     // Forward to C3 webhook
     try {
@@ -213,7 +216,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
         body: JSON.stringify({
           channelId: trigger.channelId,
           channelName: trigger.name,
-          message: msg.text,
+          message: fullMessage,
           author,
           messageTs: msg.ts,
         }),

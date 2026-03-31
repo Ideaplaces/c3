@@ -4,6 +4,7 @@ import {
   hasProcessedReaction,
   checkCooldown,
   shouldProcessMessage,
+  extractFullText,
   COOLDOWN_MS,
   PROCESSED_REACTION,
   type SlackMessage,
@@ -271,5 +272,132 @@ describe('shouldProcessMessage', () => {
       'C123', times, now + 6 * 60_000
     )
     expect(result3.process).toBe(true)
+  })
+})
+
+describe('extractFullText', () => {
+  it('returns text field for simple messages', () => {
+    const msg: SlackMessage = { text: 'simple message', ts: '1.0' }
+    expect(extractFullText(msg)).toBe('simple message')
+  })
+
+  it('returns empty string when no content', () => {
+    const msg: SlackMessage = { text: '', ts: '1.0' }
+    expect(extractFullText(msg)).toBe('')
+  })
+
+  it('extracts content from section blocks when text is truncated', () => {
+    const msg: SlackMessage = {
+      text: 'Truncated summary...',
+      ts: '1.0',
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: ':warning: prod - High Error Rate' } },
+        { type: 'section', text: { type: 'mrkdwn', text: 'This is the full detailed error report with all the context that was truncated in the text field' } },
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toContain(':warning: prod - High Error Rate')
+    expect(result).toContain('full detailed error report')
+    expect(result).not.toContain('...')
+  })
+
+  it('extracts context block elements', () => {
+    const msg: SlackMessage = {
+      text: 'Short',
+      ts: '1.0',
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: 'Alert' } },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: '*Severity:* Warning | *Environment:* prod' }] },
+        { type: 'section', text: { type: 'mrkdwn', text: 'Full error details here with a long description' } },
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toContain('Severity:')
+    expect(result).toContain('Full error details')
+  })
+
+  it('prefers blocks over truncated text', () => {
+    const msg: SlackMessage = {
+      text: 'Short truncated...',
+      ts: '1.0',
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: 'This is a much longer and more detailed message from the blocks' } },
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toBe('This is a much longer and more detailed message from the blocks')
+  })
+
+  it('falls back to text when blocks are empty', () => {
+    const msg: SlackMessage = {
+      text: 'Original text',
+      ts: '1.0',
+      blocks: [],
+    }
+    expect(extractFullText(msg)).toBe('Original text')
+  })
+
+  it('falls back to text when blocks have no text content', () => {
+    const msg: SlackMessage = {
+      text: 'Original text',
+      ts: '1.0',
+      blocks: [
+        { type: 'divider' },
+        { type: 'actions' },
+      ],
+    }
+    expect(extractFullText(msg)).toBe('Original text')
+  })
+
+  it('extracts attachment text', () => {
+    const msg: SlackMessage = {
+      text: 'Short',
+      ts: '1.0',
+      attachments: [
+        { text: 'Detailed attachment content with error info' },
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toContain('Detailed attachment content')
+  })
+
+  it('extracts attachment fields', () => {
+    const msg: SlackMessage = {
+      text: 'Alert',
+      ts: '1.0',
+      attachments: [
+        { fields: [
+          { title: 'Error', value: 'NoMethodError' },
+          { title: 'File', value: 'app/controllers/foo.rb:42' },
+        ]},
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toContain('Error: NoMethodError')
+    expect(result).toContain('File: app/controllers/foo.rb:42')
+  })
+
+  it('handles real-world alert message structure', () => {
+    // Simulates the actual Slack Block Kit message from the monitoring bot
+    const msg: SlackMessage = {
+      text: ':large_yellow_circle: prod - High Error Rate: Minified React errors (#418 and #425) are bein...',
+      ts: '1.0',
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: ':large_yellow_circle: prod - High Error Rate' } },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: '*Severity:* Warning | *Environment:* prod | *Fired:* 2026-03-31T22:02:32Z' }] },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: '*AI Summary*\nHere\'s the error log analysis:\n\n**What\'s failing:**\nMinified React errors (#418 and #425) are being thrown in the frontend-client.\n\n**Where:**\nThis affects the frontend (Next.js) client, specifically on the /en/help/program-manager-guides/monetization-beta page.\n\n**Pattern:**\nThis is the same error repeated.\n\n**Suggested action:**\nCheck the React code for the Monetization Beta guide page.' } },
+        { type: 'divider' },
+        { type: 'actions' },
+      ],
+    }
+    const result = extractFullText(msg)
+    expect(result).toContain('High Error Rate')
+    expect(result).toContain('Severity:')
+    expect(result).toContain('What\'s failing')
+    expect(result).toContain('monetization-beta')
+    expect(result).toContain('Suggested action')
+    // Should NOT be truncated
+    expect(result).not.toContain('bein...')
   })
 })
