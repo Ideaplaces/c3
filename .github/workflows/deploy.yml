@@ -1,7 +1,9 @@
-name: Build and Deploy to Azure
+name: Test, Build and Deploy
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -16,8 +18,22 @@ env:
   AZURE_CONTAINER_APP: c3-marketing
 
 jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run
+
   build-and-deploy:
     name: Build and Deploy
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -78,3 +94,20 @@ jobs:
           done
           echo "Failed to become healthy after 150 seconds"
           exit 1
+
+      - name: Discord notification on failure
+        if: failure()
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | sed 's/"/\\"/g')
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_C3_PRODUCTION }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \":x: c3 — Production build failed\",
+                \"description\": \"**Commit:** ${COMMIT_MSG}\n**Branch:** main\n**By:** ${{ github.actor }}\",
+                \"url\": \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
+                \"color\": 15158332,
+                \"footer\": {\"text\": \"production | c3.ideaplaces.com\"},
+                \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+              }]
+            }"
