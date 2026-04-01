@@ -1,5 +1,11 @@
 # C3 (Cloud Claude Code)
 
+## Branching
+
+**Work directly on `main`. No dev branch.** This is a dev tool. Commits to main deploy immediately.
+
+## Overview
+
 Remote Claude Code sessions + autonomous agents triggered by Discord/Slack messages.
 
 ## What This Is
