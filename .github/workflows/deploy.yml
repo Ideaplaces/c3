@@ -1,3 +1,14 @@
+# Configure these in GitHub repo Settings > Secrets and Variables
+#
+# Required secrets:
+#   ACR_LOGIN_SERVER       - Azure Container Registry login server (e.g. myregistry.azurecr.io)
+#   ACR_NAME               - Azure Container Registry name (e.g. myregistry)
+#   AZURE_CREDENTIALS      - Azure service principal credentials JSON
+#   AZURE_RESOURCE_GROUP   - Azure resource group name
+#   AZURE_CONTAINER_APP    - Azure Container Apps app name
+#   C3_PUBLIC_URL          - Public URL for the app (e.g. https://c3.example.com)
+#   DISCORD_WEBHOOK_DEPLOY - Discord webhook URL for failure notifications (optional)
+
 name: Test, Build and Deploy
 
 on:
@@ -10,12 +21,6 @@ on:
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  ACR_LOGIN_SERVER: acrideaplaces.azurecr.io
-  IMAGE_NAME: c3
-  AZURE_RESOURCE_GROUP: rg-ideaplaces
-  AZURE_CONTAINER_APP: c3-marketing
 
 jobs:
   test:
@@ -50,7 +55,7 @@ jobs:
 
       - name: Log in to Azure Container Registry
         run: |
-          az acr login --name acrideaplaces
+          az acr login --name ${{ secrets.ACR_NAME }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -59,27 +64,27 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/c3:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/c3:${{ github.sha }}
           platforms: linux/amd64
           build-args: |
-            NEXT_PUBLIC_BASE_URL=https://c3.ideaplaces.com
+            NEXT_PUBLIC_BASE_URL=${{ secrets.C3_PUBLIC_URL }}
             C3_MODE=marketing
-          cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/c3:buildcache
+          cache-to: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/c3:buildcache,mode=max
 
       - name: Deploy new revision
         run: |
           az containerapp update \
-            --name ${{ env.AZURE_CONTAINER_APP }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            --name ${{ secrets.AZURE_CONTAINER_APP }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/c3:${{ github.sha }}
 
       - name: Wait for deployment to be healthy
         run: |
           FQDN=$(az containerapp show \
-            --name ${{ env.AZURE_CONTAINER_APP }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_CONTAINER_APP }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           HEALTH_URL="https://${FQDN}/api/health"
           echo "Health check: $HEALTH_URL"
@@ -99,15 +104,14 @@ jobs:
         if: failure()
         run: |
           COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | sed 's/"/\\"/g')
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_C3_PRODUCTION }}" \
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_DEPLOY }}" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \":x: c3 — Production build failed\",
+                \"title\": \":x: c3 — Build/deploy failed\",
                 \"description\": \"**Commit:** ${COMMIT_MSG}\n**Branch:** main\n**By:** ${{ github.actor }}\",
                 \"url\": \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
                 \"color\": 15158332,
-                \"footer\": {\"text\": \"production | c3.ideaplaces.com\"},
                 \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
               }]
             }"
