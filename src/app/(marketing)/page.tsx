@@ -107,8 +107,12 @@ export default function LandingPage() {
           <p className="text-xl sm:text-2xl text-foreground-muted mb-4 font-heading">
             Cloud Claude Code
           </p>
-          <p className="text-lg sm:text-xl text-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-            Claude Code, from any browser. Autonomous agents, from any channel.
+          <p className="text-lg sm:text-xl text-foreground mb-4 max-w-2xl mx-auto leading-relaxed">
+            An AI agent that runs on your dev machine and does your work while you sleep.
+          </p>
+          <p className="text-sm text-foreground-muted mb-10 max-w-xl mx-auto">
+            Slack alerts trigger Claude Code sessions on YOUR machine, with YOUR repos and YOUR secrets.
+            The agent investigates, creates PRs, and reports back. You continue from your phone.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <a href="/docs">
