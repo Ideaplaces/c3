@@ -1,7 +1,16 @@
 {
-  "name": "cloud-claude-code",
+  "name": "c3-cloud-claude-code",
   "version": "0.1.0",
-  "private": true,
+  "description": "Remote Claude Code sessions + autonomous agents from Discord and Slack",
+  "author": "Ciprian Rarau <chip@ideaplaces.com>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ideaplaces/c3"
+  },
+  "homepage": "https://c3.ideaplaces.com",
+  "bugs": "https://github.com/Ideaplaces/c3/issues",
+  "keywords": ["claude-code", "ai-agents", "slack-bot", "discord-bot", "autonomous-agents", "developer-tools", "claude", "anthropic"],
   "scripts": {
     "dev": "tsx server.ts",
     "build": "next build",
