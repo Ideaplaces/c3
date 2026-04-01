@@ -2,6 +2,14 @@
 
 **An AI agent that runs on your dev machine, watches your channels, and does your work while you sleep.**
 
+[![Live Demo](https://img.shields.io/badge/demo-c3.ideaplaces.com-blue)](https://c3.ideaplaces.com)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/Ideaplaces/c3/actions)
+
+<p align="center">
+  <img src="docs/images/c3-landing.png" alt="C3 Landing Page" width="600" />
+</p>
+
 ## The Premise
 
 You have a machine where you write code. A VM, a server, a Mac Mini in a closet. That machine has your repos, your secrets, your CLI tools, your database access. You SSH into it and run Claude Code.
@@ -180,6 +188,18 @@ npx pm2 logs c3                        # Server logs
 npx pm2 restart c3                     # Restart after changes
 npx pm2 save                           # Persist across reboots
 ```
+
+## Architecture
+
+<p align="center">
+  <img src="docs/images/c3-architecture.svg" alt="C3 Architecture" width="800" />
+</p>
+
+## Built By
+
+[Ciprian Rarau](https://github.com/crarau) at [IdeaPlaces](https://ideaplaces.com)
+
+[Blog](https://ciprianrarau.com) | [GitHub](https://github.com/crarau) | [LinkedIn](https://linkedin.com/in/ciprianrarau)
 
 ## License
 
