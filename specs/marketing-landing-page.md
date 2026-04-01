@@ -1,3 +1,9 @@
+# Internal Architecture Spec
+
+This document describes the original design decisions. Fork and customize for your own setup.
+
+---
+
 # C3 Marketing Landing Page: Architecture Spec
 
 ## The Problem
