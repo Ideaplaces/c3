@@ -1,5 +1,7 @@
 # C3 - Cloud Claude Code
 
+> **Alpha.** I use this daily in production, but expect rough edges. Things may break as the project evolves.
+
 **An AI agent that runs on your dev machine, watches your channels, and does your work while you sleep.**
 
 [![Live Demo](https://img.shields.io/badge/demo-c3.ideaplaces.com-blue)](https://c3.ideaplaces.com)
@@ -145,6 +147,18 @@ This is not a consumer product. It's infrastructure for developers who want to m
 | **Loop prevention** | Eyes reaction + rate limiting + in-thread replies (unit tested) |
 | **Magic link auth** | Email sign-in, no Google OAuth dependency |
 | **Per-user config** | Triggers and prompts in `~/.c3/`, separate from the tool |
+
+## Loop Prevention (Circuit Breaker)
+
+Autonomous agents can loop. An agent replies to a channel, the poller sees the reply, triggers another agent, which replies again. C3 has three layers of protection, all unit tested:
+
+1. **Eyes reaction (👀).** Before processing a message, C3 adds a 👀 reaction. On the next poll, it skips any message that already has 👀. This is the primary guard.
+
+2. **5-minute cooldown per channel.** After starting a session, C3 won't start another one in the same channel for 5 minutes. Even if 10 messages arrive in a burst, only the first gets processed.
+
+3. **Thread-only replies.** Agent responses are posted as thread replies with `reply_broadcast: false`, so they never appear as top-level messages the poller would pick up.
+
+These are tested with 34 dedicated unit tests, including a simulation of 10 rapid messages where only the first is processed.
 
 ## Prompt Templates
 
