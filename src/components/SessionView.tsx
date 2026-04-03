@@ -26,10 +26,11 @@ interface SessionViewProps {
   }
   sessionId?: string
   projectName: string
+  projectPath?: string
   loadingStatus?: string
 }
 
-export function SessionView({ ws, sessionId, projectName, loadingStatus }: SessionViewProps) {
+export function SessionView({ ws, sessionId, projectName, projectPath: projectPathProp, loadingStatus }: SessionViewProps) {
   const [input, setInput] = useState('')
   const [permissionMode, setPermissionMode] = useState('bypassPermissions')
   const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
@@ -148,7 +149,7 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
   }, [historyHasMore, historyLoading, handleLoadPrevious])
 
   const initMessage = sdkMessages.find((m) => m.type === 'system' && 'subtype' in m && m.subtype === 'init')
-  const projectPath = initMessage && 'cwd' in initMessage ? String(initMessage.cwd) : undefined
+  const projectPath = projectPathProp || (initMessage && 'cwd' in initMessage ? String(initMessage.cwd) : undefined)
   const displayProject = projectName || (projectPath ? projectPath.split('/').pop() : '') || ''
 
   const { containerRef, showScrollButton, scrollToBottom } = useAutoScroll(

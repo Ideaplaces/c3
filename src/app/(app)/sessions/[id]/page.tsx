@@ -10,6 +10,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const connectedRef = useRef(false)
   const subscribedRef = useRef(false)
   const [status, setStatus] = useState('Reconnecting to session...')
+  const [projectPath, setProjectPath] = useState<string | undefined>()
+
+  // Fetch session metadata (for projectPath)
+  useEffect(() => {
+    fetch(`/api/sessions/${id}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.session?.projectPath) {
+          setProjectPath(data.session.projectPath)
+        }
+      })
+      .catch(() => {})
+  }, [id])
 
   // Step 1: Connect WebSocket
   useEffect(() => {
@@ -42,5 +55,5 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }, [ws.messages])
 
-  return <SessionView ws={ws} sessionId={id} projectName="" loadingStatus={status} />
+  return <SessionView ws={ws} sessionId={id} projectName="" projectPath={projectPath} loadingStatus={status} />
 }
