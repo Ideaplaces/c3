@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useState, useEffect } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Logo } from '@/components/ui/Logo'
 
@@ -16,7 +16,10 @@ function LoginContent() {
     missing_token: 'Invalid link. Sending a new one...',
   }
 
+  const sentRef = useRef(false)
   useEffect(() => {
+    if (sentRef.current) return
+    sentRef.current = true
     fetch('/api/auth/magic-link', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
