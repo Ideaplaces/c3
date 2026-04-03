@@ -10,10 +10,10 @@ module.exports = {
       args: 'tsx server.ts',
       cwd: __dirname,
       env: {
-        NODE_ENV: 'development',
+        NODE_ENV: process.env.C3_DEV === 'true' ? 'development' : 'production',
         PORT: '8347',
       },
-      watch: ['server.ts', 'src/lib', 'src/app/api'],
+      watch: process.env.C3_DEV === 'true' ? ['server.ts', 'src/lib', 'src/app/api'] : false,
       watch_delay: 1000,
       ignore_watch: ['node_modules', '.next', 'tests', '.git'],
       max_memory_restart: '500M',
