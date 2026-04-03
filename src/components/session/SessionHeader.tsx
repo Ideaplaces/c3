@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
+import { ResumeCommand } from './ResumeCommand'
 
 const PERMISSION_MODES = [
   { value: 'bypassPermissions', label: 'bypass', color: 'text-info bg-info/10', enabled: true },
@@ -16,6 +17,8 @@ interface SessionHeaderProps {
   onPermissionModeChange: (mode: string) => void
   onStop: () => void
   canStop: boolean
+  sessionId?: string
+  projectPath?: string
 }
 
 export function SessionHeader({
@@ -25,9 +28,12 @@ export function SessionHeader({
   onPermissionModeChange,
   onStop,
   canStop,
+  sessionId,
+  projectPath,
 }: SessionHeaderProps) {
   return (
-    <header className="border-b border-border px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shrink-0 relative bg-background z-10">
+    <div className="shrink-0 bg-background z-10">
+    <header className="border-b border-border px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between relative">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         <Link href="/sessions" className="text-foreground-muted hover:text-foreground transition-colors text-sm shrink-0">
           &larr;<span className="hidden sm:inline"> Sessions</span>
@@ -65,5 +71,11 @@ export function SessionHeader({
       </div>
       <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-primary via-secondary to-primary opacity-30" />
     </header>
+    {sessionId && (
+      <div className="px-3 sm:px-4 py-1.5 border-b border-border/50">
+        <ResumeCommand sessionId={sessionId} projectPath={projectPath} />
+      </div>
+    )}
+    </div>
   )
 }

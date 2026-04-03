@@ -148,7 +148,8 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
   }, [historyHasMore, historyLoading, handleLoadPrevious])
 
   const initMessage = sdkMessages.find((m) => m.type === 'system' && 'subtype' in m && m.subtype === 'init')
-  const displayProject = projectName || (initMessage && 'cwd' in initMessage ? String(initMessage.cwd).split('/').pop() : '') || ''
+  const projectPath = initMessage && 'cwd' in initMessage ? String(initMessage.cwd) : undefined
+  const displayProject = projectName || (projectPath ? projectPath.split('/').pop() : '') || ''
 
   const { containerRef, showScrollButton, scrollToBottom } = useAutoScroll(
     streamState.blocks.length + sdkMessages.length
@@ -172,6 +173,8 @@ export function SessionView({ ws, sessionId, projectName, loadingStatus }: Sessi
         onPermissionModeChange={setPermissionMode}
         onStop={() => activeSessionId && ws.stopSession(activeSessionId)}
         canStop={isRunning && !!activeSessionId}
+        sessionId={activeSessionId || undefined}
+        projectPath={projectPath}
       />
 
       {/* Messages area. Hidden until first scroll-to-bottom completes. */}
