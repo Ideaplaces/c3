@@ -4,6 +4,7 @@ import type { UserPayload, ClientMessage, ServerMessage } from '@/types/ws'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
 import { readSessionTail, readSessionBefore, readSessionJSONL } from '@/lib/claude-sessions/reader'
+import { getSession } from '@/lib/store/sessions'
 import { statSync } from 'fs'
 
 const clientSessions = new Map<WebSocket, Set<string>>()
@@ -144,42 +145,53 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
             }
             send(ws, { type: 'history_batch', sessionId, messages: [], cursor, hasMore })
 
-            // Poll JSONL file for new events (session might still be running)
-            let sentCount = allEvents.length
-            let lastSize = statSync(jsonlPath).size
-            let idleCount = 0
+            // Check stored status: if already done, no need to poll for 30s
+            const storedSession = getSession(sessionId)
+            const storedStatus = storedSession?.status
+            const isFinished = storedStatus === 'completed' || storedStatus === 'idle' || storedStatus === 'error'
 
-            const pollTimer = setInterval(() => {
-              try {
-                if (ws.readyState !== ws.OPEN) {
-                  clearInterval(pollTimer)
-                  return
-                }
-                const currentSize = statSync(jsonlPath).size
-                if (currentSize > lastSize) {
-                  idleCount = 0
-                  lastSize = currentSize
-                  const updatedEvents = readSessionJSONL(jsonlPath)
-                  const newEvents = updatedEvents.slice(sentCount)
-                  for (const event of newEvents) {
-                    send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
-                  }
-                  sentCount = updatedEvents.length
-                } else {
-                  idleCount++
-                  // After 30 seconds of no changes, session is done
-                  if (idleCount >= 15) {
+            if (isFinished) {
+              // Session is already done, send ended immediately
+              send(ws, { type: 'session_ended', sessionId, reason: storedStatus })
+            } else {
+              // Session might still be running (e.g., after PM2 restart). Poll for changes.
+              send(ws, { type: 'session_started', sessionId })
+
+              let sentCount = allEvents.length
+              let lastSize = statSync(jsonlPath).size
+              let idleCount = 0
+
+              const pollTimer = setInterval(() => {
+                try {
+                  if (ws.readyState !== ws.OPEN) {
                     clearInterval(pollTimer)
-                    send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
+                    return
                   }
+                  const currentSize = statSync(jsonlPath).size
+                  if (currentSize > lastSize) {
+                    idleCount = 0
+                    lastSize = currentSize
+                    const updatedEvents = readSessionJSONL(jsonlPath)
+                    const newEvents = updatedEvents.slice(sentCount)
+                    for (const event of newEvents) {
+                      send(ws, { type: 'sdk_event', sessionId, message: event.message as SDKMessage })
+                    }
+                    sentCount = updatedEvents.length
+                  } else {
+                    idleCount++
+                    // After 30 seconds of no changes, session is done
+                    if (idleCount >= 15) {
+                      clearInterval(pollTimer)
+                      send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
+                    }
+                  }
+                } catch {
+                  clearInterval(pollTimer)
                 }
-              } catch {
-                clearInterval(pollTimer)
-              }
-            }, 2000)
+              }, 2000)
 
-            ws.on('close', () => clearInterval(pollTimer))
-            send(ws, { type: 'session_started', sessionId })
+              ws.on('close', () => clearInterval(pollTimer))
+            }
           } else {
             send(ws, { type: 'session_ended', sessionId, reason: 'completed' })
           }
