@@ -174,8 +174,6 @@ export function SessionView({ ws, sessionId, projectName, projectPath: projectPa
         onPermissionModeChange={setPermissionMode}
         onStop={() => activeSessionId && ws.stopSession(activeSessionId)}
         canStop={isRunning && !!activeSessionId}
-        sessionId={activeSessionId || undefined}
-        projectPath={projectPath}
       />
 
       {/* Messages area. Hidden until first scroll-to-bottom completes. */}
@@ -264,6 +262,7 @@ export function SessionView({ ws, sessionId, projectName, projectPath: projectPa
         disabled={!activeSessionId || isRunning}
         isRunning={isRunning}
         autoFocus={ready}
+        resumeCommand={activeSessionId ? `${projectPath ? `cd ${projectPath} && ` : ''}claude --resume ${activeSessionId} --dangerously-skip-permissions` : undefined}
       />
     </div>
   )
