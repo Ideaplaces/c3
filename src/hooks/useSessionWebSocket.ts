@@ -14,6 +14,8 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const onAuthenticatedRef = useRef(options?.onAuthenticated)
   onAuthenticatedRef.current = options?.onAuthenticated
+  const bufferRef = useRef<ServerMessage[]>([])
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const connect = useCallback(async () => {
     // Get JWT token from session endpoint
@@ -43,7 +45,30 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
           setSessionId(message.sessionId)
         }
 
-        setMessages((prev) => [...prev, message])
+        // Buffer messages and flush in batch to avoid per-message re-renders
+        bufferRef.current.push(message)
+
+        // Flush immediately on signals that mark end of a batch
+        const isFlushSignal = message.type === 'history_batch' || message.type === 'session_ended' || message.type === 'authenticated'
+        if (isFlushSignal) {
+          if (flushTimerRef.current) {
+            clearTimeout(flushTimerRef.current)
+            flushTimerRef.current = null
+          }
+          const batch = bufferRef.current
+          bufferRef.current = []
+          setMessages((prev) => [...prev, ...batch])
+        } else if (!flushTimerRef.current) {
+          // For streaming events, flush every 50ms
+          flushTimerRef.current = setTimeout(() => {
+            flushTimerRef.current = null
+            const batch = bufferRef.current
+            bufferRef.current = []
+            if (batch.length > 0) {
+              setMessages((prev) => [...prev, ...batch])
+            }
+          }, 50)
+        }
       } catch (e) {
         console.error('Failed to parse WS message:', e)
       }
