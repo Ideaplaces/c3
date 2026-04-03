@@ -10,7 +10,16 @@
   },
   "homepage": "https://c3.ideaplaces.com",
   "bugs": "https://github.com/Ideaplaces/c3/issues",
-  "keywords": ["claude-code", "ai-agents", "slack-bot", "discord-bot", "autonomous-agents", "developer-tools", "claude", "anthropic"],
+  "keywords": [
+    "claude-code",
+    "ai-agents",
+    "slack-bot",
+    "discord-bot",
+    "autonomous-agents",
+    "developer-tools",
+    "claude",
+    "anthropic"
+  ],
   "scripts": {
     "dev": "tsx server.ts",
     "build": "next build",
@@ -47,6 +56,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.14",
     "husky": "^9.1.7",
+    "playwright": "^1.59.1",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
