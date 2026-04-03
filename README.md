@@ -1,12 +1,14 @@
 # C3 - Cloud Claude Code
 
+> **[c3.ideaplaces.com](https://c3.ideaplaces.com)** | See C3 in action
+
 > **Alpha.** I use this daily in production, but expect rough edges. Things may break as the project evolves.
 
 **An AI agent that runs on your dev machine, watches your channels, and does your work while you sleep.**
 
 [![Live Demo](https://img.shields.io/badge/demo-c3.ideaplaces.com-blue)](https://c3.ideaplaces.com)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/Ideaplaces/c3/actions)
+[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)](https://github.com/Ideaplaces/c3/actions)
 
 <p align="center">
   <img src="docs/images/c3-landing.png" alt="C3 Landing Page" width="600" />
@@ -208,6 +210,28 @@ npx pm2 save                           # Persist across reboots
 <p align="center">
   <img src="docs/images/c3-architecture.svg" alt="C3 Architecture" width="800" />
 </p>
+
+## FAQ
+
+**Q: How do you prevent the agent from breaking your environment?**
+
+The prompt. Each Slack/Discord channel has a prompt template attached to it, and the prompt defines the agent's boundaries. Here's an example of safety rules we use in production:
+
+```
+- NEVER push to main or develop directly
+- NEVER modify CI/CD pipelines or deployment configs
+- NEVER run database migrations
+- NEVER delete files or data
+- NEVER change environment variables in production
+- Always create PRs targeting develop
+- Keep fixes minimal. One concern per PR.
+```
+
+The prompts live in `~/.c3/prompts/`, separate from C3 itself. C3 is the plumbing; the prompt is where your expertise and guardrails live.
+
+**Q: Where do the safety rules live? In C3 or in the config?**
+
+In your config (`~/.c3/`). C3 itself has no opinion about what the agent should or shouldn't do. Your `triggers.json` maps channels to prompt templates, and the prompt templates define the rules. This means different channels can have different levels of autonomy: a production alerts channel might be read only, while a dev channel might allow PRs.
 
 ## Built By
 
