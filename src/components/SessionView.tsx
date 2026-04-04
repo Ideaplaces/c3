@@ -168,9 +168,11 @@ export function SessionView({ ws, sessionId, projectName, projectPath: projectPa
       <SessionHeader
         projectName={displayProject}
         isRunning={isRunning}
+        connected={ws.connected}
         permissionMode={permissionMode}
         onPermissionModeChange={setPermissionMode}
         onStop={() => activeSessionId && ws.stopSession(activeSessionId)}
+        onReconnect={() => ws.connect()}
         canStop={isRunning && !!activeSessionId}
       />
 

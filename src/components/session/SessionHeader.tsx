@@ -12,18 +12,22 @@ const PERMISSION_MODES = [
 interface SessionHeaderProps {
   projectName: string
   isRunning: boolean
+  connected: boolean
   permissionMode: string
   onPermissionModeChange: (mode: string) => void
   onStop: () => void
+  onReconnect: () => void
   canStop: boolean
 }
 
 export function SessionHeader({
   projectName,
   isRunning,
+  connected,
   permissionMode,
   onPermissionModeChange,
   onStop,
+  onReconnect,
   canStop,
 }: SessionHeaderProps) {
   return (
@@ -51,6 +55,15 @@ export function SessionHeader({
             <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
             <span className="hidden sm:inline">Running</span>
           </span>
+        )}
+        {!connected && (
+          <button
+            onClick={onReconnect}
+            className="inline-flex items-center gap-1.5 text-xs text-warning hover:text-foreground shrink-0 transition-colors"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+            Disconnected
+          </button>
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0">

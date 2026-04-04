@@ -16,23 +16,35 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
   onAuthenticatedRef.current = options?.onAuthenticated
   const bufferRef = useRef<ServerMessage[]>([])
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const subscribedSessionRef = useRef<string | null>(null)
+  const intentionalCloseRef = useRef(false)
+  const tokenRef = useRef<string | null>(null)
 
-  const connect = useCallback(async () => {
-    // Get JWT token from session endpoint
-    const res = await fetch('/api/auth/session')
-    if (!res.ok) return
+  const connectInternal = useCallback(async () => {
+    // Clean up existing connection
+    if (wsRef.current) {
+      intentionalCloseRef.current = true
+      wsRef.current.close()
+      wsRef.current = null
+    }
 
-    // Get the token from the cookie directly isn't possible from client
-    // Instead, we'll get it via a dedicated endpoint
-    const tokenRes = await fetch('/api/auth/ws-token')
-    if (!tokenRes.ok) return
-    const { token } = await tokenRes.json()
+    // Get token (reuse if we have one, fetch if not)
+    if (!tokenRef.current) {
+      const res = await fetch('/api/auth/session')
+      if (!res.ok) return
+      const tokenRes = await fetch('/api/auth/ws-token')
+      if (!tokenRes.ok) return
+      const { token } = await tokenRes.json()
+      tokenRef.current = token
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${tokenRef.current}`)
 
     ws.onopen = () => {
       setConnected(true)
+      console.log('[WS] Connected')
     }
 
     ws.onmessage = (event) => {
@@ -41,6 +53,11 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
 
         if (message.type === 'authenticated') {
           onAuthenticatedRef.current?.(message.user)
+          // Re-subscribe to session if we were watching one
+          if (subscribedSessionRef.current) {
+            console.log('[WS] Re-subscribing to session:', subscribedSessionRef.current)
+            ws.send(JSON.stringify({ type: 'subscribe', sessionId: subscribedSessionRef.current }))
+          }
         } else if (message.type === 'session_started') {
           setSessionId(message.sessionId)
         }
@@ -48,7 +65,6 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
         // Buffer messages and flush in batch to avoid per-message re-renders
         bufferRef.current.push(message)
 
-        // Flush immediately on signals that mark end of a batch
         const isFlushSignal = message.type === 'history_batch' || message.type === 'session_ended' || message.type === 'authenticated'
         if (isFlushSignal) {
           if (flushTimerRef.current) {
@@ -59,7 +75,6 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
           bufferRef.current = []
           setMessages((prev) => [...prev, ...batch])
         } else if (!flushTimerRef.current) {
-          // For streaming events, flush every 50ms
           flushTimerRef.current = setTimeout(() => {
             flushTimerRef.current = null
             const batch = bufferRef.current
@@ -76,6 +91,18 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
 
     ws.onclose = () => {
       setConnected(false)
+      wsRef.current = null
+
+      if (!intentionalCloseRef.current) {
+        // Unintentional close: reconnect after a short delay
+        console.log('[WS] Connection lost, reconnecting in 2s...')
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null
+          tokenRef.current = null // Force fresh token
+          connectInternal()
+        }, 2000)
+      }
+      intentionalCloseRef.current = false
     }
 
     ws.onerror = (error) => {
@@ -85,9 +112,16 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
     wsRef.current = ws
   }, [])
 
+  const connect = useCallback(async () => {
+    intentionalCloseRef.current = false
+    await connectInternal()
+  }, [connectInternal])
+
   const sendMessage = useCallback((message: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
+    } else {
+      console.warn('[WS] Cannot send, WebSocket not open')
     }
   }, [])
 
@@ -109,6 +143,7 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
   }, [sendMessage])
 
   const subscribe = useCallback((sid: string) => {
+    subscribedSessionRef.current = sid
     sendMessage({ type: 'subscribe', sessionId: sid })
   }, [sendMessage])
 
@@ -117,12 +152,21 @@ export function useSessionWebSocket(options?: UseSessionWebSocketOptions) {
   }, [sendMessage])
 
   const disconnect = useCallback(() => {
+    intentionalCloseRef.current = true
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
     wsRef.current?.close()
     wsRef.current = null
   }, [])
 
   useEffect(() => {
     return () => {
+      intentionalCloseRef.current = true
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+      }
       wsRef.current?.close()
     }
   }, [])
