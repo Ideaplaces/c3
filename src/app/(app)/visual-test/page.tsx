@@ -23,6 +23,7 @@ function VisualTestInner() {
     messages: data.messages,
     connected: true,
     sessionId: 'mock-session-001',
+    connect: () => {},
     sendPrompt: () => {},
     stopSession: () => {},
     loadPrevious: () => {},
