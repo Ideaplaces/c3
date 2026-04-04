@@ -54,7 +54,7 @@ export function SessionInput({ onSend, disabled, isRunning, autoFocus, resumeCom
           placeholder={isRunning ? 'Wait for response...' : 'Send a follow-up prompt...'}
           disabled={disabled}
           rows={1}
-          className="flex-1 min-w-0 bg-surface border border-border rounded-md px-2 sm:px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-50 min-h-[44px]"
+          className="flex-1 min-w-0 bg-surface border border-border rounded-md px-2 sm:px-3 py-2 text-foreground font-mono text-base sm:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-50 min-h-[44px]"
         />
         <Button
           variant="primary"
