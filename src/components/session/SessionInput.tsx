@@ -4,17 +4,16 @@ import { useRef, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 
 interface SessionInputProps {
-  value: string
-  onChange: (value: string) => void
-  onSend: () => void
+  onSend: (text: string) => void
   disabled: boolean
   isRunning: boolean
   autoFocus?: boolean
   resumeCommand?: string
 }
 
-export function SessionInput({ value, onChange, onSend, disabled, isRunning, autoFocus, resumeCommand }: SessionInputProps) {
+export function SessionInput({ onSend, disabled, isRunning, autoFocus, resumeCommand }: SessionInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [value, setValue] = useState('')
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -23,10 +22,17 @@ export function SessionInput({ value, onChange, onSend, disabled, isRunning, aut
     }
   }, [autoFocus, isRunning])
 
+  const handleSend = () => {
+    if (!value.trim() || disabled) return
+    onSend(value.trim())
+    setValue('')
+    inputRef.current?.focus()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      onSend()
+      handleSend()
     }
   }
 
@@ -43,7 +49,7 @@ export function SessionInput({ value, onChange, onSend, disabled, isRunning, aut
         <textarea
           ref={inputRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isRunning ? 'Wait for response...' : 'Send a follow-up prompt...'}
           disabled={disabled}
@@ -53,7 +59,7 @@ export function SessionInput({ value, onChange, onSend, disabled, isRunning, aut
         <Button
           variant="primary"
           size="md"
-          onClick={onSend}
+          onClick={handleSend}
           disabled={!value.trim() || disabled}
           className="shrink-0"
         >

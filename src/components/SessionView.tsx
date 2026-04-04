@@ -31,7 +31,6 @@ interface SessionViewProps {
 }
 
 export function SessionView({ ws, sessionId, projectName, projectPath: projectPathProp, loadingStatus }: SessionViewProps) {
-  const [input, setInput] = useState('')
   const [permissionMode, setPermissionMode] = useState('bypassPermissions')
   const [prependedMessages, setPrependedMessages] = useState<ServerMessage[]>([])
   const [historyCursor, setHistoryCursor] = useState<number | null>(null)
@@ -159,10 +158,9 @@ export function SessionView({ ws, sessionId, projectName, projectPath: projectPa
   const isLoading = loadingStatus && sdkMessages.length === 0 && streamState.blocks.length === 0
   const hasMessages = sdkMessages.length > 0 || streamState.blocks.length > 0
 
-  const handleSend = () => {
-    if (!input.trim() || !activeSessionId) return
-    ws.sendPrompt(activeSessionId, input.trim(), permissionMode)
-    setInput('')
+  const handleSend = (text: string) => {
+    if (!activeSessionId) return
+    ws.sendPrompt(activeSessionId, text, permissionMode)
   }
 
   return (
@@ -256,8 +254,6 @@ export function SessionView({ ws, sessionId, projectName, projectPath: projectPa
       </div>
 
       <SessionInput
-        value={input}
-        onChange={setInput}
         onSend={handleSend}
         disabled={!activeSessionId || isRunning}
         isRunning={isRunning}
