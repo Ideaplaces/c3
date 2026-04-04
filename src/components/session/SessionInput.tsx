@@ -44,8 +44,8 @@ export function SessionInput({ onSend, disabled, isRunning, autoFocus, resumeCom
   }
 
   return (
-    <div className="border-t border-border px-2 sm:px-4 py-2 sm:py-3 pb-[env(safe-area-inset-bottom,8px)] shrink-0 bg-background z-10">
-      <div className="flex gap-2 min-w-0">
+    <div className="border-t border-border px-2 sm:px-4 py-2 sm:py-3 pb-[env(safe-area-inset-bottom,8px)] shrink-0 bg-background z-10 overflow-hidden">
+      <div className="flex gap-1.5 sm:gap-2 w-full">
         <textarea
           ref={inputRef}
           value={value}
@@ -54,14 +54,14 @@ export function SessionInput({ onSend, disabled, isRunning, autoFocus, resumeCom
           placeholder={isRunning ? 'Wait for response...' : 'Send a follow-up prompt...'}
           disabled={disabled}
           rows={1}
-          className="flex-1 min-w-0 bg-surface border border-border rounded-md px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-50 min-h-[44px]"
+          className="flex-1 min-w-0 bg-surface border border-border rounded-md px-2 sm:px-3 py-2 text-foreground font-mono text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-50 min-h-[44px]"
         />
         <Button
           variant="primary"
-          size="md"
+          size="sm"
           onClick={handleSend}
           disabled={!value.trim() || disabled}
-          className="shrink-0"
+          className="shrink-0 sm:!px-4 sm:!py-2 sm:!text-sm sm:!min-h-[40px]"
         >
           Send
         </Button>
