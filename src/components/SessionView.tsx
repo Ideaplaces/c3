@@ -20,6 +20,7 @@ interface SessionViewProps {
     messages: ServerMessage[]
     connected: boolean
     sessionId: string | null
+    connect: () => void
     sendPrompt: (sessionId: string, prompt: string, permissionMode?: string) => void
     stopSession: (sessionId: string) => void
     loadPrevious: (sessionId: string, cursor: number) => void
