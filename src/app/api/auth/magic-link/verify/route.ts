@@ -1,4 +1,3 @@
-import { cookies, headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, signToken } from '@/lib/auth/jwt'
 
@@ -24,8 +23,11 @@ export async function GET(request: NextRequest) {
 
   const sessionToken = signToken(user)
 
-  const cookieStore = await cookies()
-  cookieStore.set('ccc_session', sessionToken, {
+  const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
+  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
+
+  const response = NextResponse.redirect(`${baseUrl}${safePath}`)
+  response.cookies.set('ccc_session', sessionToken, {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
@@ -33,8 +35,5 @@ export async function GET(request: NextRequest) {
     maxAge: 30 * 24 * 60 * 60,
   })
 
-  const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
-  // Only allow relative paths to prevent open redirect
-  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
-  return NextResponse.redirect(`${baseUrl}${safePath}`)
+  return response
 }
