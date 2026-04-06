@@ -16,19 +16,17 @@ function LoginContent() {
     missing_token: 'Invalid link. Sending a new one...',
   }
 
-  // Store returnTo in localStorage so it survives the email round-trip
-  useEffect(() => {
-    const returnTo = searchParams.get('returnTo')
-    if (returnTo) {
-      localStorage.setItem('ccc_return_to', returnTo)
-    }
-  }, [searchParams])
+  const returnTo = searchParams.get('returnTo') || '/sessions'
 
   const sentRef = useRef(false)
   useEffect(() => {
     if (sentRef.current) return
     sentRef.current = true
-    fetch('/api/auth/magic-link', { method: 'POST' })
+    fetch('/api/auth/magic-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ returnTo }),
+    })
       .then(res => res.json())
       .then(data => {
         if (data.email) {

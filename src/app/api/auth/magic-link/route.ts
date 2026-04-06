@@ -1,4 +1,5 @@
 import { signToken } from '@/lib/auth/jwt'
+import { setReturnTo } from '@/lib/auth/return-to'
 import { Resend } from 'resend'
 import { headers } from 'next/headers'
 
@@ -8,7 +9,7 @@ const ALLOWED_EMAILS = (process.env.CCC_ALLOWED_EMAILS || '').split(',').map(e =
 const lastSentAt = new Map<string, number>()
 const DEDUP_WINDOW_MS = 30_000
 
-export async function POST() {
+export async function POST(request: Request) {
   const email = ALLOWED_EMAILS[0]
   if (!email) {
     return Response.json({ error: 'No allowed email configured' }, { status: 500 })
@@ -19,11 +20,23 @@ export async function POST() {
     return Response.json({ error: 'Email not configured' }, { status: 500 })
   }
 
+  // Parse returnTo from request body
+  let returnTo = '/sessions'
+  try {
+    const body = await request.json()
+    if (body.returnTo && typeof body.returnTo === 'string' && body.returnTo.startsWith('/') && !body.returnTo.startsWith('//')) {
+      returnTo = body.returnTo
+    }
+  } catch {}
+
+  // Store returnTo server-side (persisted to disk, survives module reloads)
+  setReturnTo(email, returnTo)
+
   // Dedup check
   const now = Date.now()
   const prev = lastSentAt.get(email) || 0
   if (now - prev < DEDUP_WINDOW_MS) {
-    console.log(`[Magic Link] Dedup: already sent to ${email} ${now - prev}ms ago`)
+    console.log(`[Magic Link] Dedup: already sent to ${email} ${now - prev}ms ago (returnTo=${returnTo})`)
     return Response.json({ ok: true, email })
   }
   lastSentAt.set(email, now)
@@ -34,7 +47,7 @@ export async function POST() {
   const proto = headersList.get('x-forwarded-proto') || 'https'
   const baseUrl = `${proto}://${host}`
 
-  console.log(`[Magic Link] Sending to ${email} | baseUrl=${baseUrl}`)
+  console.log(`[Magic Link] Sending to ${email} | returnTo=${returnTo} | baseUrl=${baseUrl}`)
 
   const token = signToken({ email, name: email.split('@')[0], avatarUrl: null })
   const magicUrl = `${baseUrl}/api/auth/magic-link/verify?token=${token}`

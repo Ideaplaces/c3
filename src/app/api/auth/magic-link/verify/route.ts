@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, signToken } from '@/lib/auth/jwt'
+import { getReturnTo } from '@/lib/auth/return-to'
 
 function getBaseUrl(request: NextRequest): string {
   const headersList = request.headers
@@ -23,7 +24,13 @@ export async function GET(request: NextRequest) {
 
   const sessionToken = signToken(user)
 
-  const response = NextResponse.redirect(`${baseUrl}/sessions`)
+  // Read returnTo from server-side file storage
+  const returnTo = getReturnTo(user.email)
+  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
+
+  console.log(`[Magic Link Verify] user=${user.email} returnTo=${safePath}`)
+
+  const response = NextResponse.redirect(`${baseUrl}${safePath}`)
   response.cookies.set('ccc_session', sessionToken, {
     httpOnly: true,
     secure: true,

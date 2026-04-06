@@ -15,14 +15,6 @@ export default function SessionsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [user, setUser] = useState<{ email: string; name: string } | null>(null)
 
-  // Check if we need to redirect after login
-  useEffect(() => {
-    const returnTo = localStorage.getItem('ccc_return_to')
-    if (returnTo && returnTo !== '/sessions') {
-      localStorage.removeItem('ccc_return_to')
-      router.replace(returnTo)
-    }
-  }, [router])
 
   const fetchSessions = useCallback(() => {
     fetch('/api/sessions')
