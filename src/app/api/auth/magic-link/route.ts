@@ -4,24 +4,15 @@ import { headers } from 'next/headers'
 
 const ALLOWED_EMAILS = (process.env.CCC_ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase())
 
-// Dedup: track last send time per email to prevent double sends
-const lastSentAt = new Map<string, number>()
-const DEDUP_WINDOW_MS = 10_000 // 10 seconds
+// Dedup: track last send per email to prevent double sends from React re-renders
+const lastSent = new Map<string, { at: number; returnTo: string }>()
+const DEDUP_WINDOW_MS = 30_000 // 30 seconds
 
 export async function POST(request: Request) {
   const email = ALLOWED_EMAILS[0]
   if (!email) {
     return Response.json({ error: 'No allowed email configured' }, { status: 500 })
   }
-
-  // Dedup check: skip if we sent to this email in the last 10 seconds
-  const now = Date.now()
-  const lastSent = lastSentAt.get(email) || 0
-  if (now - lastSent < DEDUP_WINDOW_MS) {
-    console.log(`[Magic Link] Dedup: skipping duplicate send to ${email} (${now - lastSent}ms ago)`)
-    return Response.json({ ok: true, email })
-  }
-  lastSentAt.set(email, now)
 
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
@@ -37,13 +28,22 @@ export async function POST(request: Request) {
     }
   } catch {}
 
+  // Dedup check: skip if we sent to this email recently
+  const now = Date.now()
+  const prev = lastSent.get(email)
+  if (prev && now - prev.at < DEDUP_WINDOW_MS) {
+    console.log(`[Magic Link] Dedup: already sent to ${email} ${now - prev.at}ms ago`)
+    return Response.json({ ok: true, email })
+  }
+  lastSent.set(email, { at: now, returnTo })
+
   // Build base URL from request headers (works behind Cloudflare tunnel)
   const headersList = await headers()
   const host = headersList.get('host') || 'localhost:8347'
   const proto = headersList.get('x-forwarded-proto') || 'https'
   const baseUrl = `${proto}://${host}`
 
-  console.log(`[Magic Link] host=${host} proto=${proto} baseUrl=${baseUrl} returnTo=${returnTo}`)
+  console.log(`[Magic Link] Sending to ${email} | returnTo=${returnTo} | baseUrl=${baseUrl}`)
 
   const token = signToken({ email, name: email.split('@')[0], avatarUrl: null })
   const magicUrl = `${baseUrl}/api/auth/magic-link/verify?token=${token}&returnTo=${encodeURIComponent(returnTo)}`

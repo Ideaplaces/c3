@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
   const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
   const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
 
+  console.log(`[Magic Link Verify] user=${user.email} returnTo=${returnTo} safePath=${safePath} redirectTo=${baseUrl}${safePath}`)
+
   const response = NextResponse.redirect(`${baseUrl}${safePath}`)
   response.cookies.set('ccc_session', sessionToken, {
     httpOnly: true,
