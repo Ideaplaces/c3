@@ -24,7 +24,12 @@ export async function GET(request: NextRequest) {
 
   const sessionToken = signToken(user)
 
-  const returnTo = popReturnTo(user.email)
+  // Try user-specific key first, then the _pending key set by middleware
+  let returnTo = popReturnTo(user.email)
+  if (returnTo === '/sessions') {
+    const pending = popReturnTo('_pending')
+    if (pending !== '/sessions') returnTo = pending
+  }
 
   console.log(`[Magic Link Verify] user=${user.email} returnTo=${returnTo}`)
 

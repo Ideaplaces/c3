@@ -10,40 +10,39 @@ function LoginContent() {
   const [sent, setSent] = useState(false)
   const [email, setEmail] = useState('')
   const [error, setError] = useState(searchParams.get('error') || '')
+  const returnTo = searchParams.get('returnTo')
 
   const errorMessages: Record<string, string> = {
     expired: 'Link expired. Sending a new one...',
     missing_token: 'Invalid link. Sending a new one...',
   }
 
-  const returnTo = searchParams.get('returnTo') || '/sessions'
-
   const sentRef = useRef(false)
-  const returnToRef = useRef(returnTo)
-  returnToRef.current = returnTo
-
   useEffect(() => {
     if (sentRef.current) return
     sentRef.current = true
-    // Small delay to ensure searchParams have resolved after Suspense
-    const timer = setTimeout(() => {
-      fetch('/api/auth/magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ returnTo: returnToRef.current }),
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data.email) {
-            setEmail(data.email)
-            setSent(true)
-            setError('')
-          }
-        })
-        .catch(() => setError('Connection error'))
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [])
+
+    const run = async () => {
+      // Store returnTo server-side before sending the magic link
+      if (returnTo) {
+        await fetch('/api/auth/return-to', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ returnTo }),
+        }).catch(() => {})
+      }
+
+      const res = await fetch('/api/auth/magic-link', { method: 'POST' })
+      const data = await res.json()
+      if (data.email) {
+        setEmail(data.email)
+        setSent(true)
+        setError('')
+      }
+    }
+
+    run().catch(() => setError('Connection error'))
+  }, [returnTo])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
