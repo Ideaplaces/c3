@@ -35,6 +35,6 @@ export async function GET(request: NextRequest) {
 
   const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
   // Only allow relative paths to prevent open redirect
-  const safePath = returnTo.startsWith('/') ? returnTo : '/sessions'
+  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
   return NextResponse.redirect(`${baseUrl}${safePath}`)
 }

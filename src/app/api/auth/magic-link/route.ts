@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   let returnTo = '/sessions'
   try {
     const body = await request.json()
-    if (body.returnTo && typeof body.returnTo === 'string' && body.returnTo.startsWith('/')) {
+    if (body.returnTo && typeof body.returnTo === 'string' && body.returnTo.startsWith('/') && !body.returnTo.startsWith('//')) {
       returnTo = body.returnTo
     }
   } catch {}
