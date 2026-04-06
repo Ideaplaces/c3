@@ -16,6 +16,14 @@ function LoginContent() {
     missing_token: 'Invalid link. Sending a new one...',
   }
 
+  // Store returnTo in localStorage so it survives the email round-trip
+  useEffect(() => {
+    const returnTo = searchParams.get('returnTo')
+    if (returnTo) {
+      localStorage.setItem('ccc_return_to', returnTo)
+    }
+  }, [searchParams])
+
   const sentRef = useRef(false)
   useEffect(() => {
     if (sentRef.current) return
