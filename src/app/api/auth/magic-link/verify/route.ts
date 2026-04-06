@@ -33,5 +33,8 @@ export async function GET(request: NextRequest) {
     maxAge: 30 * 24 * 60 * 60,
   })
 
-  return NextResponse.redirect(`${baseUrl}/sessions`)
+  const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
+  // Only allow relative paths to prevent open redirect
+  const safePath = returnTo.startsWith('/') ? returnTo : '/sessions'
+  return NextResponse.redirect(`${baseUrl}${safePath}`)
 }
