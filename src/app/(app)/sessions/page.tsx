@@ -15,7 +15,6 @@ export default function SessionsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [user, setUser] = useState<{ email: string; name: string } | null>(null)
 
-
   const fetchSessions = useCallback(() => {
     fetch('/api/sessions')
       .then((r) => r.json())

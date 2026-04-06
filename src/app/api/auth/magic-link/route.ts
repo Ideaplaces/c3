@@ -1,5 +1,5 @@
 import { signToken } from '@/lib/auth/jwt'
-import { setReturnTo } from '@/lib/auth/return-to'
+import { setReturnTo, sanitizeReturnTo } from '@/lib/auth/return-to'
 import { Resend } from 'resend'
 import { headers } from 'next/headers'
 
@@ -20,13 +20,10 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Email not configured' }, { status: 500 })
   }
 
-  // Parse returnTo from request body
   let returnTo = '/sessions'
   try {
     const body = await request.json()
-    if (body.returnTo && typeof body.returnTo === 'string' && body.returnTo.startsWith('/') && !body.returnTo.startsWith('//')) {
-      returnTo = body.returnTo
-    }
+    returnTo = sanitizeReturnTo(body.returnTo)
   } catch {}
 
   // Store returnTo server-side (persisted to disk, survives module reloads)

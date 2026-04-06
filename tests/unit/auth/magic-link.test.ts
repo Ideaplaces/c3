@@ -1,22 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import { sanitizeReturnTo, DEFAULT_RETURN_PATH } from '@/lib/auth/return-to'
 
-/**
- * Tests for the magic link auth flow logic.
- * These test the pure logic extracted from the route handlers.
- */
-
-describe('returnTo parameter', () => {
-  function sanitizeReturnTo(returnTo: string | null | undefined): string {
-    if (!returnTo || typeof returnTo !== 'string' || !returnTo.startsWith('/') || returnTo.startsWith('//')) {
-      return '/sessions'
-    }
-    return returnTo
-  }
-
+describe('sanitizeReturnTo', () => {
   it('defaults to /sessions when returnTo is missing', () => {
-    expect(sanitizeReturnTo(null)).toBe('/sessions')
-    expect(sanitizeReturnTo(undefined)).toBe('/sessions')
-    expect(sanitizeReturnTo('')).toBe('/sessions')
+    expect(sanitizeReturnTo(null)).toBe(DEFAULT_RETURN_PATH)
+    expect(sanitizeReturnTo(undefined)).toBe(DEFAULT_RETURN_PATH)
+    expect(sanitizeReturnTo('')).toBe(DEFAULT_RETURN_PATH)
   })
 
   it('accepts valid relative paths', () => {
@@ -25,12 +14,12 @@ describe('returnTo parameter', () => {
   })
 
   it('rejects absolute URLs (open redirect prevention)', () => {
-    expect(sanitizeReturnTo('https://evil.com')).toBe('/sessions')
-    expect(sanitizeReturnTo('http://evil.com/sessions')).toBe('/sessions')
+    expect(sanitizeReturnTo('https://evil.com')).toBe(DEFAULT_RETURN_PATH)
+    expect(sanitizeReturnTo('http://evil.com/sessions')).toBe(DEFAULT_RETURN_PATH)
   })
 
   it('rejects protocol-relative URLs', () => {
-    expect(sanitizeReturnTo('//evil.com')).toBe('/sessions')
+    expect(sanitizeReturnTo('//evil.com')).toBe(DEFAULT_RETURN_PATH)
   })
 
   it('preserves path with query params', () => {
@@ -84,15 +73,5 @@ describe('login redirect flow', () => {
   it('encodes root path', () => {
     const url = buildLoginUrl('https://c3.example.com', '/sessions')
     expect(url).toContain('returnTo=%2Fsessions')
-  })
-
-  function buildMagicUrl(baseUrl: string, token: string, returnTo: string): string {
-    return `${baseUrl}/api/auth/magic-link/verify?token=${token}&returnTo=${encodeURIComponent(returnTo)}`
-  }
-
-  it('embeds returnTo in magic link URL', () => {
-    const url = buildMagicUrl('https://c3.example.com', 'jwt-token', '/sessions/abc-123')
-    expect(url).toContain('returnTo=%2Fsessions%2Fabc-123')
-    expect(url).toContain('token=jwt-token')
   })
 })

@@ -1,6 +1,7 @@
 echo "[pre-push] Type checking src/..."
-if npx tsc --noEmit 2>&1 | grep -q "^src/"; then
-  npx tsc --noEmit 2>&1 | grep "^src/"
+SRC_ERRORS=$(npx tsc --noEmit 2>&1 | grep "^src/" || true)
+if [ -n "$SRC_ERRORS" ]; then
+  echo "$SRC_ERRORS"
   echo "[pre-push] Type errors in src/, aborting push."
   exit 1
 fi

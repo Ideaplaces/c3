@@ -58,10 +58,10 @@ export function SessionInput({ onSend, disabled, isRunning, autoFocus, resumeCom
         />
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={handleSend}
           disabled={!value.trim() || disabled}
-          className="shrink-0 sm:!px-4 sm:!py-2 sm:!text-sm sm:!min-h-[40px]"
+          className="shrink-0"
         >
           Send
         </Button>
