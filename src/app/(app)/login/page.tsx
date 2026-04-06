@@ -19,23 +19,30 @@ function LoginContent() {
   const returnTo = searchParams.get('returnTo') || '/sessions'
 
   const sentRef = useRef(false)
+  const returnToRef = useRef(returnTo)
+  returnToRef.current = returnTo
+
   useEffect(() => {
     if (sentRef.current) return
     sentRef.current = true
-    fetch('/api/auth/magic-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnTo }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.email) {
-          setEmail(data.email)
-          setSent(true)
-          setError('')
-        }
+    // Small delay to ensure searchParams have resolved after Suspense
+    const timer = setTimeout(() => {
+      fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ returnTo: returnToRef.current }),
       })
-      .catch(() => setError('Connection error'))
+        .then(res => res.json())
+        .then(data => {
+          if (data.email) {
+            setEmail(data.email)
+            setSent(true)
+            setError('')
+          }
+        })
+        .catch(() => setError('Connection error'))
+    }, 100)
+    return () => clearTimeout(timer)
   }, [])
 
   return (
