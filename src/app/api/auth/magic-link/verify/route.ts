@@ -23,12 +23,15 @@ export async function GET(request: NextRequest) {
 
   const sessionToken = signToken(user)
 
-  const returnTo = request.nextUrl.searchParams.get('returnTo') || '/sessions'
+  // Read returnTo from cookie (set by middleware when user was redirected to login)
+  const returnTo = request.cookies.get('ccc_return_to')?.value || '/sessions'
   const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/sessions'
 
-  console.log(`[Magic Link Verify] user=${user.email} returnTo=${returnTo} safePath=${safePath} redirectTo=${baseUrl}${safePath}`)
+  console.log(`[Magic Link Verify] user=${user.email} returnTo=${safePath}`)
 
   const response = NextResponse.redirect(`${baseUrl}${safePath}`)
+
+  // Set session cookie
   response.cookies.set('ccc_session', sessionToken, {
     httpOnly: true,
     secure: true,
@@ -36,6 +39,9 @@ export async function GET(request: NextRequest) {
     path: '/',
     maxAge: 30 * 24 * 60 * 60,
   })
+
+  // Clear the returnTo cookie
+  response.cookies.delete('ccc_return_to')
 
   return response
 }

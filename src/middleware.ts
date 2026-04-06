@@ -38,8 +38,16 @@ export function middleware(request: NextRequest) {
   const sessionToken = request.cookies.get('ccc_session')?.value
   if (!sessionToken) {
     const baseUrl = getBaseUrl(request)
-    const returnTo = encodeURIComponent(pathname)
-    return NextResponse.redirect(`${baseUrl}/login?returnTo=${returnTo}`)
+    const response = NextResponse.redirect(`${baseUrl}/login`)
+    // Store the page they were trying to reach so we can redirect after login
+    response.cookies.set('ccc_return_to', pathname, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 300, // 5 minutes
+    })
+    return response
   }
 
   return NextResponse.next()

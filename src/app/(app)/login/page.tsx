@@ -10,7 +10,6 @@ function LoginContent() {
   const [sent, setSent] = useState(false)
   const [email, setEmail] = useState('')
   const [error, setError] = useState(searchParams.get('error') || '')
-  const returnTo = searchParams.get('returnTo') || '/sessions'
 
   const errorMessages: Record<string, string> = {
     expired: 'Link expired. Sending a new one...',
@@ -21,11 +20,7 @@ function LoginContent() {
   useEffect(() => {
     if (sentRef.current) return
     sentRef.current = true
-    fetch('/api/auth/magic-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnTo }),
-    })
+    fetch('/api/auth/magic-link', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
         if (data.email) {
@@ -35,7 +30,7 @@ function LoginContent() {
         }
       })
       .catch(() => setError('Connection error'))
-  }, [returnTo])
+  }, [])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
