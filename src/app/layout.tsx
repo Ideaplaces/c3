@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Roboto, Montserrat, JetBrains_Mono } from 'next/font/google'
+import { PostHogProvider } from './posthog-provider'
 import './globals.css'
 
 const roboto = Roboto({ subsets: ['latin'], weight: ['400', '500', '700'], variable: '--font-roboto' })
@@ -34,7 +35,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${roboto.variable} ${montserrat.variable} ${jetbrainsMono.variable} antialiased`}>
-        {children}
+        <PostHogProvider>
+          {children}
+        </PostHogProvider>
       </body>
     </html>
   )

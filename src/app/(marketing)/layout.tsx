@@ -1,12 +1,10 @@
 import Link from 'next/link'
 import { Logo } from '@/components/ui/Logo'
-import { PostHogProvider } from './posthog-provider'
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   const isFullMode = process.env.C3_MODE !== 'marketing'
 
   return (
-    <PostHogProvider>
     <div className="min-h-screen bg-background flex flex-col">
       {/* Nav */}
       <nav className="border-b border-border px-4 sm:px-8 py-4 relative">
@@ -52,6 +50,5 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
         </div>
       </footer>
     </div>
-    </PostHogProvider>
   )
 }
