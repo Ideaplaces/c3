@@ -55,5 +55,21 @@ module.exports = {
       merge_logs: true,
       time: true,
     },
+    {
+      name: 'c3-cron-scheduler',
+      script: 'npx',
+      args: 'tsx cron-scheduler.ts',
+      cwd: __dirname,
+      env: {
+        NODE_ENV: 'production',
+        CCC_URL: 'http://localhost:8347',
+      },
+      watch: false,
+      max_memory_restart: '200M',
+      error_file: path.join(logsDir, 'cron-scheduler-error.log'),
+      out_file: path.join(logsDir, 'cron-scheduler-out.log'),
+      merge_logs: true,
+      time: true,
+    },
   ],
 }

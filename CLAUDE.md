@@ -6,14 +6,14 @@
 
 ## Overview
 
-Remote Claude Code sessions + autonomous agents triggered by Discord/Slack messages.
+Remote Claude Code sessions + autonomous agents triggered by Discord messages, Slack messages, or cron schedules.
 
 ## What This Is
 
 C3 is a web layer on top of the Claude Code SDK. It does two things:
 
 1. **Remote sessions.** Pilot Claude Code from any browser, any device.
-2. **Autonomous triggers.** Discord/Slack messages start headless Claude Code sessions that investigate, act, and report back.
+2. **Autonomous triggers.** Discord messages, Slack messages, or cron schedules start headless Claude Code sessions that investigate, act, and report back.
 
 Both use the same SessionManager. Both visible in the same web UI. An agent starts a session at 3am; you open C3 the next morning and continue the conversation.
 
@@ -24,8 +24,9 @@ c3/                         # Next.js app
   server.ts                 # HTTP + WebSocket server
   discord-bot.ts            # Discord channel listener (optional)
   slack-poller.ts           # Slack channel poller (optional)
+  cron-scheduler.ts         # Cron-based trigger scheduler (optional)
   src/
-    app/api/webhooks/       # Discord + Slack webhook endpoints
+    app/api/webhooks/       # Discord, Slack, and Cron webhook endpoints
     lib/sdk/session-manager.ts  # Claude Agent SDK wrapper
     lib/triggers/config.ts  # Loads triggers from ~/.c3/
     lib/slack-poller/logic.ts   # Tested loop prevention logic

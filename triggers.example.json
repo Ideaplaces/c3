@@ -9,6 +9,17 @@
       "model": "claude-opus-4-6"
     }
   },
+  "cron": {
+    "weekly-report": {
+      "name": "weekly-report",
+      "schedule": "0 9 * * 5",
+      "prompt": "weekly-report.md",
+      "projectPath": "~/my-project",
+      "permissionMode": "bypassPermissions",
+      "model": "claude-sonnet-4-6",
+      "enabled": true
+    }
+  },
   "slack": {
     "my-slack-channel": {
       "name": "my-slack-channel",

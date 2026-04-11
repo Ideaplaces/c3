@@ -15,9 +15,20 @@ export interface SlackTrigger extends ChannelTrigger {
   slackBotToken?: string
 }
 
+export interface CronTrigger {
+  name: string
+  schedule: string
+  prompt: string
+  projectPath: string
+  permissionMode: string
+  model: string
+  enabled?: boolean
+}
+
 interface TriggersConfig {
   channels: Record<string, ChannelTrigger>
   slack?: Record<string, SlackTrigger>
+  cron?: Record<string, CronTrigger>
 }
 
 const HOME = process.env.HOME || '/tmp'
@@ -93,6 +104,22 @@ export function getAllSlackTriggers(): SlackTrigger[] {
   const config = loadTriggersConfig()
   if (!config.slack) return []
   return Object.values(config.slack)
+}
+
+export function getCronTrigger(name: string): CronTrigger | null {
+  const config = loadTriggersConfig()
+  if (!config.cron) return null
+  const trigger = config.cron[name]
+  if (!trigger) return null
+  return { ...trigger, projectPath: resolveProjectPath(trigger.projectPath) }
+}
+
+export function getAllCronTriggers(): CronTrigger[] {
+  const config = loadTriggersConfig()
+  if (!config.cron) return []
+  return Object.values(config.cron)
+    .filter(t => t.enabled !== false)
+    .map(t => ({ ...t, projectPath: resolveProjectPath(t.projectPath) }))
 }
 
 export function loadPromptTemplate(
