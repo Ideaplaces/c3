@@ -6,7 +6,7 @@
       "prompt": "hello-world.md",
       "projectPath": "~/my-project",
       "permissionMode": "bypassPermissions",
-      "model": "claude-sonnet-4-6"
+      "model": "claude-opus-4-6"
     }
   },
   "slack": {
@@ -16,7 +16,7 @@
       "prompt": "investigate-error.md",
       "projectPath": "~/my-project",
       "permissionMode": "bypassPermissions",
-      "model": "claude-sonnet-4-6",
+      "model": "claude-opus-4-6",
       "pollIntervalMs": 15000
     }
   }

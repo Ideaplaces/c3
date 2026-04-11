@@ -69,7 +69,7 @@ export class SessionManager extends EventEmitter {
       machineName: hostname(),
       status: 'running',
       permissionMode,
-      model: model || 'claude-sonnet-4-6',
+      model: model || 'claude-opus-4-6',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       turnCount: 0,

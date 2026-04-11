@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     projectPath: trigger.projectPath,
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
-    model: trigger.model || 'claude-sonnet-4-6',
+    model: trigger.model || 'claude-opus-4-6',
   })
 
   console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
