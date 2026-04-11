@@ -68,6 +68,12 @@ export default function SessionsPage() {
             {user && (
               <span className="text-sm text-foreground-muted hidden sm:inline">{user.name}</span>
             )}
+            <a href="/triggers">
+              <Button variant="outline" size="sm">
+                <span className="sm:hidden">Triggers</span>
+                <span className="hidden sm:inline">Triggers</span>
+              </Button>
+            </a>
             <Button
               variant="primary"
               size="md"
