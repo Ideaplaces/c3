@@ -4,6 +4,10 @@
 
 **Work directly on `main`. No dev branch.** This is a dev tool. Commits to main deploy immediately.
 
+## CRITICAL: Push Every Change
+
+C3 config lives in git (`Ideaplaces/c3` for the tool, `Ideaplaces/c3-chip` for Chip's private triggers and prompts). **Any edit to `ecosystem.config.cjs`, `cron-scheduler.ts`, `discord-bot.ts`, `slack-poller.ts`, or the triggers repo must be committed AND pushed before you consider the work done.** The scheduler PM2 process reads from the local working tree, but any machine that syncs the repo will overwrite your un-pushed changes. We have lost a morning to this — a trigger was set up, never pushed, and no one could find it. Always: edit → commit → push → `npx pm2 restart c3-cron-scheduler --update-env` if needed.
+
 ## Overview
 
 Remote Claude Code sessions + autonomous agents triggered by Discord messages, Slack messages, or cron schedules.
