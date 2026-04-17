@@ -63,6 +63,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         CCC_URL: 'http://localhost:8347',
+        TZ: 'America/Toronto',
       },
       watch: false,
       max_memory_restart: '200M',
