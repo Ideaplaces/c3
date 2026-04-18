@@ -136,8 +136,15 @@ const lastFireTime = new Map<string, number>()
 
 async function checkAndFire(trigger: CronTrigger) {
   const now = new Date()
+  const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`
 
-  if (!cronMatches(trigger.schedule, now)) return
+  if (!cronMatches(trigger.schedule, now)) {
+    // Log once per minute to avoid spam (only log at second < 30 for the first check of each 30s cycle)
+    if (now.getSeconds() < 30) {
+      console.log(`[Cron Scheduler] No match for "${trigger.name}" (${trigger.schedule}) at ${timeStr}`)
+    }
+    return
+  }
 
   // Prevent double-fire within the same minute
   const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
@@ -191,6 +198,8 @@ async function main() {
     // Reload config each cycle (hot-reload like other pollers)
     const freshTriggers = loadTriggers()
     const activeTriggers = Object.values(freshTriggers.cron || {}).filter(t => t.enabled !== false)
+    const now = new Date()
+    console.log(`[Cron Scheduler] Checking ${activeTriggers.length} triggers at ${now.toISOString()} (${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')})`)
 
     for (const trigger of activeTriggers) {
       try {
