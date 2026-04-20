@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/webhooks/', '/api/health', '/api/client-log']
+const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/webhooks/', '/api/health', '/api/client-log', '/api/catalog']
 const MARKETING_MODE = process.env.C3_MODE === 'marketing'
 
 const APP_PATHS = ['/sessions', '/login', '/api/auth/', '/api/sessions', '/api/projects']
