@@ -85,8 +85,12 @@ client.on('ready', () => {
 })
 
 client.on('messageCreate', async (msg) => {
-  // Ignore bot messages
-  if (msg.author.bot) return
+  // Ignore our own messages to prevent loops.
+  if (msg.author.id === client.user?.id) return
+
+  // Ignore other bots, but allow webhook-posted messages (e.g. Azure Function
+  // error summarizers, GitHub/Linear notifiers) so they can trigger sessions.
+  if (msg.author.bot && !msg.webhookId) return
 
   const triggers = loadTriggers()
   const watchedChannels = new Set(Object.values(triggers.channels).map(t => t.channelId))
