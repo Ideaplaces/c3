@@ -171,7 +171,7 @@ const callbackServer = http.createServer(async (req, res) => {
               ? data.summary.slice(0, 1800) + '...'
               : data.summary
 
-            const baseUrl = process.env.CCC_PUBLIC_URL || CCC_URL
+            const baseUrl = process.env.C3_BASE_URL || CCC_URL
             const replyContent = [
               `**Session completed** (\`${data.sessionId.slice(0, 8)}\`)`,
               '',
