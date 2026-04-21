@@ -182,9 +182,6 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       continue
     }
 
-    // Mark as processed IMMEDIATELY (before forwarding) to prevent re-processing
-    await markAsProcessed(token, trigger.channelId, msg.ts)
-
     // Get author name
     let author = 'bot'
     if (msg.user) {
@@ -205,7 +202,11 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     const fullMessage = extractFullText(msg)
     console.log(`[Slack Poller] Processing message from ${author} (${fullMessage.length} chars): ${fullMessage.slice(0, 100)}...`)
 
-    // Forward to C3 webhook
+    // Forward to C3 webhook. :eyes: is only added AFTER a confirmed session is
+    // created, so a dead/500-responding c3 cannot silently swallow a message.
+    let sessionId: string | undefined
+    let failureReason: string | undefined
+
     try {
       const webhookRes = await fetch(`${CCC_URL}/api/webhooks/slack`, {
         method: 'POST',
@@ -222,15 +223,31 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
         }),
       })
 
-      const result = await webhookRes.json() as { sessionId?: string; error?: string }
-      if (webhookRes.ok && result.sessionId) {
-        console.log(`[Slack Poller] Session started: ${result.sessionId}`)
-        lastSessionTime.set(trigger.channelId, Date.now())
+      if (!webhookRes.ok) {
+        failureReason = `HTTP ${webhookRes.status} ${webhookRes.statusText}`
       } else {
-        console.error(`[Slack Poller] Webhook error:`, result.error)
+        const result = await webhookRes.json() as { sessionId?: string; error?: string }
+        if (result.sessionId) {
+          sessionId = result.sessionId
+        } else {
+          failureReason = `no sessionId (error: ${result.error || 'unknown'})`
+        }
       }
     } catch (err) {
-      console.error(`[Slack Poller] Error calling C3:`, err)
+      failureReason = err instanceof Error ? err.message : String(err)
+    }
+
+    if (sessionId) {
+      console.log(`[Slack Poller] Session started: ${sessionId}`)
+      lastSessionTime.set(trigger.channelId, Date.now())
+      // Only mark the Slack message as processed after c3 confirms a session.
+      await markAsProcessed(token, trigger.channelId, msg.ts)
+    } else {
+      console.error(
+        `[Slack Poller] Webhook failed for ${trigger.name} msg ${msg.ts}: ${failureReason}. Leaving :eyes: off so it is visible as unprocessed.`
+      )
+      // Do NOT mark as processed. lastTs has already advanced so we don't re-fetch,
+      // but the absent :eyes: reaction flags the message for human attention.
     }
   }
 }

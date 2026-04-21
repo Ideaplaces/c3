@@ -21,9 +21,56 @@ interface StartSessionParams {
   model?: string
 }
 
+// Sessions whose SDK generator stops emitting events for longer than this are
+// presumed hung and force-aborted so listeners (Slack/Discord webhooks) still
+// receive a session_ended signal. Configurable via env for long-running jobs.
+const STALL_TIMEOUT_MS = parseInt(process.env.C3_SESSION_STALL_TIMEOUT_MS || '600000', 10)
+const STALL_CHECK_INTERVAL_MS = 60_000
+
 export class SessionManager extends EventEmitter {
   private activeSessions = new Map<string, ActiveSession>()
   private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
+  private lastEventTime = new Map<string, number>()
+  private stalledSessions = new Set<string>()
+  private watchdogInterval: NodeJS.Timeout
+
+  constructor() {
+    super()
+    this.watchdogInterval = setInterval(() => this.checkStalledSessions(), STALL_CHECK_INTERVAL_MS)
+    // Don't keep the Node process alive just for this timer.
+    this.watchdogInterval.unref?.()
+  }
+
+  private checkStalledSessions() {
+    const now = Date.now()
+    for (const [sid, active] of this.activeSessions) {
+      if (this.stalledSessions.has(sid)) continue
+      const lastEvent = this.lastEventTime.get(sid) ?? now
+      const ageMs = now - lastEvent
+      if (ageMs > STALL_TIMEOUT_MS) {
+        console.warn(
+          `[SessionManager] Session ${sid} stalled: no SDK events for ${Math.round(ageMs / 1000)}s (timeout ${STALL_TIMEOUT_MS / 1000}s). Aborting.`
+        )
+        this.stalledSessions.add(sid)
+        try {
+          active.abortController.abort()
+        } catch (err) {
+          console.error(`[SessionManager] Abort failed for ${sid}:`, err)
+        }
+        // In case abort does not propagate into the generator (observed with
+        // hung SDK streams), emit session_ended directly after a short grace
+        // period so the Slack/Discord reply still goes out.
+        setTimeout(() => {
+          if (this.activeSessions.has(sid)) {
+            console.warn(`[SessionManager] Session ${sid} did not exit after abort. Force-emitting session_ended.`)
+            this.activeSessions.delete(sid)
+            updateSession(sid, { status: 'error', errorMessage: 'stalled: no SDK events within timeout' })
+            this.emit('session_ended', sid, 'stalled')
+          }
+        }, 30_000)
+      }
+    }
+  }
 
   async startSession(params: StartSessionParams): Promise<string> {
     const { projectPath, prompt, permissionMode, model } = params
@@ -175,6 +222,8 @@ export class SessionManager extends EventEmitter {
     if (active) {
       active.query.close()
       this.activeSessions.delete(sessionId)
+      this.lastEventTime.delete(sessionId)
+      this.stalledSessions.delete(sessionId)
       updateSession(sessionId, { status: 'idle' })
       this.emit('session_ended', sessionId, 'stopped')
     }
@@ -215,8 +264,11 @@ export class SessionManager extends EventEmitter {
       this.eventBuffers.set(sessionId, [])
     }
 
+    this.lastEventTime.set(sessionId, Date.now())
+
     try {
       for await (const message of q) {
+        this.lastEventTime.set(sessionId, Date.now())
         // Buffer the event in memory for late subscribers
         const event = { sessionId, message }
         const buffer = this.eventBuffers.get(sessionId)
@@ -230,6 +282,8 @@ export class SessionManager extends EventEmitter {
 
       // Generator completed normally
       this.activeSessions.delete(sessionId)
+      this.lastEventTime.delete(sessionId)
+      this.stalledSessions.delete(sessionId)
       const currentSession = getSession(sessionId)
       if (!currentSession || !['completed', 'error'].includes(currentSession.status)) {
         updateSession(sessionId, { status: 'idle' })
@@ -237,9 +291,13 @@ export class SessionManager extends EventEmitter {
       this.emit('session_ended', sessionId, 'completed')
     } catch (error) {
       this.activeSessions.delete(sessionId)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      this.lastEventTime.delete(sessionId)
+      const wasStalled = this.stalledSessions.delete(sessionId)
+      const errorMessage = wasStalled
+        ? 'stalled: SDK generator aborted after no events within timeout'
+        : error instanceof Error ? error.message : 'Unknown error'
       updateSession(sessionId, { status: 'error', errorMessage })
-      this.emit('session_ended', sessionId, errorMessage)
+      this.emit('session_ended', sessionId, wasStalled ? 'stalled' : errorMessage)
     }
   }
 
