@@ -111,8 +111,9 @@ export default function LandingPage() {
             An AI agent that runs on your dev machine and does your work while you sleep.
           </p>
           <p className="text-sm text-foreground-muted mb-10 max-w-xl mx-auto">
-            Slack alerts trigger Claude Code sessions on YOUR machine, with YOUR repos and YOUR secrets.
-            The agent investigates, creates PRs, and reports back. You continue from your phone.
+            Not a cloud sandbox. Your always-on machine, your credentials, your real tools.
+            Slack or Discord alerts trigger Claude Code (or Codex, or OpenClaude) sessions in your repos.
+            The agent investigates, drafts a PR, and reports back. You review, merge, continue from your phone.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <a href="/docs">
@@ -285,6 +286,101 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto">
           <h2 className="text-2xl sm:text-3xl font-bold font-heading text-center mb-12">How It Works</h2>
           <ArchitectureDiagram />
+        </div>
+      </section>
+
+      {/* Not a Sandbox */}
+      <section className="px-4 sm:px-8 py-16 bg-surface/50">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-2xl sm:text-3xl font-bold font-heading text-center mb-4">Not a Sandbox</h2>
+          <p className="text-foreground-muted text-center mb-10 max-w-2xl mx-auto">
+            Anthropic runs agents in their cloud. C3 runs on yours. Both are useful. They solve different problems.
+          </p>
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface">
+                    <th className="text-left px-4 py-3 font-semibold">Capability</th>
+                    <th className="text-left px-4 py-3 font-semibold">Anthropic Routines / Managed Agents</th>
+                    <th className="text-left px-4 py-3 font-semibold">C3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['Where it runs', 'Anthropic cloud sandbox', 'Your always-on dev machine'],
+                    ['Production database', 'No direct access', 'Read-only via your query scripts'],
+                    ['Cloud CLI and secrets', 'Scoped connectors', 'Azure CLI, kubectl, Key Vault via managed identity'],
+                    ['Session continuity', 'Run-to-completion', 'Resume on web, phone, terminal, VS Code'],
+                    ['Model choice', 'Claude only', 'Claude Code, OpenAI Codex, OpenClaude, anything'],
+                    ['Prompt and behavior', 'Anthropic-defined shape', 'Plain markdown in ~/.c3/prompts/'],
+                  ].map(([capability, anthropic, c3], i, arr) => (
+                    <tr key={capability} className={i < arr.length - 1 ? 'border-b border-border' : ''}>
+                      <td className="px-4 py-3 font-semibold">{capability}</td>
+                      <td className="px-4 py-3 text-foreground-muted">{anthropic}</td>
+                      <td className="px-4 py-3">{c3}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      {/* Agent Proposes. Human Disposes. */}
+      <section className="px-4 sm:px-8 py-16">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="text-2xl sm:text-3xl font-bold font-heading mb-4">Agent proposes. Human disposes.</h2>
+          <p className="text-foreground-muted text-lg leading-relaxed mb-4">
+            On enterprise SaaS with real paying customers, the agent does not touch production unilaterally.
+            It reads the alert, investigates in the correct repo with the correct credentials,
+            writes a PR with root cause, fix, tests, and recommendation, and stops.
+          </p>
+          <p className="text-foreground-muted text-lg leading-relaxed mb-4">
+            You review, merge, and ship.
+          </p>
+          <p className="text-primary text-xl font-semibold mt-6">
+            The agent saves investigation time. Not judgment time.
+          </p>
+          <p className="text-sm text-foreground-muted mt-6">
+            Safety lives in the prompt, not the platform. You write the rules per channel.
+          </p>
+        </div>
+      </section>
+
+      {/* Real Production */}
+      <section className="px-4 sm:px-8 py-16 bg-surface/50">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-2xl sm:text-3xl font-bold font-heading text-center mb-4">Running in Production</h2>
+          <p className="text-foreground-muted text-center mb-10 max-w-2xl mx-auto">
+            Not a pitch. Running continuously on a real paying-customer SaaS.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {[
+              { n: '20', k: 'Days live' },
+              { n: '17+', k: 'PRs drafted' },
+              { n: '0', k: 'Off-hours wakeups' },
+              { n: '100%', k: 'Human reviewed' },
+            ].map(({ n, k }) => (
+              <Card key={k} className="p-6 text-center">
+                <div className="text-3xl sm:text-4xl font-bold text-primary">{n}</div>
+                <div className="text-xs uppercase tracking-wider text-foreground-muted mt-2">{k}</div>
+              </Card>
+            ))}
+          </div>
+          <p className="text-center text-foreground-muted">
+            Full minute-by-minute walkthrough:{' '}
+            <a
+              href="https://docs.ideaplaces.com/presentations/cto-meetup-2026"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              CTO meetup presentation
+            </a>
+            .
+          </p>
         </div>
       </section>
 
