@@ -128,6 +128,41 @@ Other AI tools run in the cloud. They can read your code (if you give them acces
 
 C3 can do all of this because it runs where you work. It's not a sandboxed agent with limited access. It's Claude Code with the same permissions you have.
 
+## Agent Proposes. Human Disposes.
+
+On enterprise SaaS with real paying customers, the agent does not touch production unilaterally. It reads the alert, investigates in the correct repo with the correct credentials, queries production read-only when it needs to, writes a PR with root cause, fix, tests, and recommendation, and stops. You review, merge, and ship.
+
+The agent saves investigation time. Not judgment time.
+
+Safety lives in the prompt, not the platform. A production channel can enforce read-only investigation and PR-only fixes. A dev channel can allow full access. You write the rules per channel.
+
+## Not a Sandbox
+
+Anthropic shipped Claude Code Routines and Managed Agents in April 2026. Both run in Anthropic's cloud. C3 is the other shape of the same idea: run on your dev machine with your credentials. Both are useful. They solve different problems.
+
+| Capability | Anthropic Routines / Managed Agents | C3 |
+|------------|-------------------------------------|-----|
+| Where it runs | Anthropic cloud sandbox | Your always-on dev machine |
+| Production database | No direct access | Read-only via your existing query scripts |
+| Cloud CLI and secrets | Scoped connectors | Azure CLI, kubectl, Key Vault via managed identity |
+| Session continuity | Run-to-completion | Resume on web, phone, terminal, VS Code |
+| Model choice | Claude only | Claude Code, OpenAI Codex, OpenClaude, anything |
+| Prompt and behavior | Anthropic-defined shape | Plain markdown in `~/.c3/prompts/` |
+
+## Multi-Agent, Multi-Trigger
+
+C3 is not just Claude Code. A trigger can run Claude Code, OpenAI Codex, OpenClaude on Azure GPT-5, or any other agent shape you wire up. A trigger can fire from a Slack message, a Discord message, a cron schedule, a webhook, or a browser button. The agent can reply in the thread, post to a different channel, DM a person, write a report, or open a PR.
+
+Set intentions. Not tasks.
+
+## Real Production
+
+C3 has been running continuously on a production enterprise SaaS for 20+ days at the time of writing. In that window the agent drafted 17 pull requests across the backend and web repos: React hydration fixes, Cronofy rate-limit handling with a second-order API volume reduction, a two-day David Yurman SSO incident chain where it named its own prior PR and tied the follow-up failure to it, a booking acceptance race condition with tests, and a 1:37 AM messaging stack overflow that shipped to review before the author woke up.
+
+Every PR was human reviewed before merge. One was closed by a human because the fix (removing auth middleware) should not have been decided by an agent. That is the behavior you actually want.
+
+Full minute-by-minute walkthrough: [docs.ideaplaces.com/presentations/cto-meetup-2026](https://docs.ideaplaces.com/presentations/cto-meetup-2026).
+
 ## Who This Is For
 
 Developers who:
