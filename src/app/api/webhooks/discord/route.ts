@@ -60,12 +60,17 @@ export async function POST(request: Request) {
     // Reply in Discord directly
     if (discordBotToken && messageId) {
       const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
+      const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
       const replyContent = [
         `**Session completed** (\`${sessionId.slice(0, 8)}\`)`,
         '',
         summary.length > 1800 ? summary.slice(0, 1800) + '...' : summary,
         '',
         `View full session: ${baseUrl}/sessions/${sessionId}`,
+        `Resume in terminal:`,
+        '```',
+        resumeCommand,
+        '```',
       ].join('\n')
 
       // Reply to the original message
@@ -89,7 +94,7 @@ export async function POST(request: Request) {
       fetch(callbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, reason, summary }),
+        body: JSON.stringify({ sessionId, reason, summary, projectPath: trigger.projectPath }),
       }).catch(err => console.error(`[Webhook] External callback failed:`, err))
     }
   }

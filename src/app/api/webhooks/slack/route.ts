@@ -90,14 +90,18 @@ export async function POST(request: Request) {
         summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
       )
 
+      const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
       const slackMessage = [
         `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
         '',
         slackSummary,
         '',
         `*Continue this conversation:*`,
-        `Terminal: \`claude --resume ${sessionId}\``,
         `Browser: ${baseUrl}/sessions/${sessionId}`,
+        `Resume in terminal:`,
+        '```',
+        resumeCommand,
+        '```',
       ].join('\n')
 
       // Reply in thread (thread_ts = original message timestamp)

@@ -158,7 +158,7 @@ const callbackServer = http.createServer(async (req, res) => {
     req.on('data', (chunk: Buffer) => { body += chunk.toString() })
     req.on('end', async () => {
       try {
-        const data = JSON.parse(body) as { sessionId: string; reason: string; summary: string }
+        const data = JSON.parse(body) as { sessionId: string; reason: string; summary: string; projectPath?: string }
         const pending = pendingSessions.get(data.sessionId)
 
         if (pending) {
@@ -172,12 +172,22 @@ const callbackServer = http.createServer(async (req, res) => {
               : data.summary
 
             const baseUrl = process.env.C3_BASE_URL || CCC_URL
+            const resumeLines: string[] = []
+            if (data.projectPath) {
+              resumeLines.push(
+                `Resume in terminal:`,
+                '```',
+                `cd ${data.projectPath} && claude --resume ${data.sessionId} --dangerously-skip-permissions`,
+                '```',
+              )
+            }
             const replyContent = [
               `**Session completed** (\`${data.sessionId.slice(0, 8)}\`)`,
               '',
               truncatedSummary,
               '',
               `View full session: ${baseUrl}/sessions/${data.sessionId}`,
+              ...resumeLines,
             ].join('\n')
 
             try {
