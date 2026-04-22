@@ -19,6 +19,7 @@ interface StartSessionParams {
   prompt: string
   permissionMode: string
   model?: string
+  sessionId?: string
 }
 
 // Sessions whose SDK generator stops emitting events for longer than this are
@@ -74,7 +75,7 @@ export class SessionManager extends EventEmitter {
 
   async startSession(params: StartSessionParams): Promise<string> {
     const { projectPath, prompt, permissionMode, model } = params
-    const sessionId = randomUUID()
+    const sessionId = params.sessionId ?? randomUUID()
     const abortController = new AbortController()
 
     // Strip CLAUDECODE env var to allow nested SDK sessions

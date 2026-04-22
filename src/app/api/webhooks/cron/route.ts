@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getCronTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 
@@ -23,13 +24,22 @@ export async function POST(request: Request) {
 
   console.log(`[Cron Webhook] Trigger "${trigger.name}" fired (schedule: ${schedule})`)
 
+  // Pre-generate the sessionId so it can be substituted into the prompt
+  // template. This lets cron-triggered prompts (which post their own
+  // Discord/Slack messages) include a "resume in terminal" command that
+  // points at the right session.
+  const sessionId = randomUUID()
+
   const prompt = loadPromptTemplate(trigger.prompt, {
     schedule: schedule || trigger.schedule,
     timestamp: timestamp || new Date().toISOString(),
     triggerName: trigger.name,
+    sessionId,
+    projectPath: trigger.projectPath,
   })
 
-  const sessionId = await sessionManager.startSession({
+  await sessionManager.startSession({
+    sessionId,
     projectPath: trigger.projectPath,
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
