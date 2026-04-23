@@ -230,4 +230,61 @@ describe('SessionManager', () => {
       manager.stopSession('nonexistent')
     })
   })
+
+  describe('self-heal: processMessages rejection', () => {
+    it('recovers when the SDK iterator throws synchronously so the singleton stays healthy for future sessions', async () => {
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const mockQuery = query as unknown as ReturnType<typeof vi.fn>
+
+      // Spike one bad session whose iterator throws immediately on first next().
+      mockQuery.mockImplementationOnce(() => ({
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              throw new Error('simulated SDK failure')
+            },
+            async return() { return { value: undefined, done: true } },
+            async throw(e: unknown) { throw e },
+          }
+        },
+        streamInput: vi.fn(),
+        close: vi.fn(),
+      }))
+
+      const endedEvents: Array<{ sid: string; reason: string }> = []
+      manager.on('session_ended', (sid: string, reason: string) => {
+        endedEvents.push({ sid, reason })
+      })
+
+      const badId = await manager.startSession({
+        projectPath: '/test',
+        prompt: 'this will blow up',
+        permissionMode: 'bypassPermissions',
+      })
+
+      await new Promise((r) => setTimeout(r, 30))
+
+      // Bad session must have fired session_ended with the error message, not
+      // silently disappeared. This is the regression guard for the 41h
+      // degradation on Apr 22-23 where processMessages rejections broke the
+      // event pipeline for every subsequent session.
+      expect(endedEvents.some((e) => e.sid === badId && e.reason.includes('simulated SDK failure'))).toBe(true)
+      expect(manager.isSessionActive(badId)).toBe(false)
+
+      // A normal session started right after must still emit session_ended.
+      mockMessages = [
+        { type: 'result', subtype: 'success', session_id: 'ccc-uuid-1234', num_turns: 1, total_cost_usd: 0.01, duration_ms: 100, duration_api_ms: 80, is_error: false, stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use_input_tokens: 0 }, modelUsage: {}, permission_denials: [], uuid: 'good-run' },
+      ]
+
+      const goodId = await manager.startSession({
+        projectPath: '/test',
+        prompt: 'this should work',
+        permissionMode: 'bypassPermissions',
+      })
+
+      await new Promise((r) => setTimeout(r, 30))
+
+      expect(endedEvents.some((e) => e.sid === goodId && e.reason === 'completed')).toBe(true)
+    })
+  })
 })

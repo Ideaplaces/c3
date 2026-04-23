@@ -2,6 +2,7 @@ import { query, type Query, type SDKMessage, type Options } from '@anthropic-ai/
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { hostname } from 'os'
+import { statSync } from 'fs'
 import { createSession, updateSession, getSession } from '@/lib/store/sessions'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
@@ -22,16 +23,24 @@ interface StartSessionParams {
   sessionId?: string
 }
 
-// Sessions whose SDK generator stops emitting events for longer than this are
-// presumed hung and force-aborted so listeners (Slack/Discord webhooks) still
-// receive a session_ended signal. Configurable via env for long-running jobs.
+// Classic stall: the SDK generator stops emitting events for this long → abort
+// and force-emit session_ended so Slack/Discord replies still fire. Configurable
+// via env for jobs that legitimately think for a long time.
 const STALL_TIMEOUT_MS = parseInt(process.env.C3_SESSION_STALL_TIMEOUT_MS || '600000', 10)
 const STALL_CHECK_INTERVAL_MS = 60_000
+// JSONL self-heal: when the SDK's on-disk session file has stopped growing
+// AND the iterator has gone quiet, the agent is done but the iterator hung.
+// The JSONL is our independent source of truth. Recover by force-emitting
+// session_ended as 'completed' so listeners pick up the agent's final output.
+const JSONL_IDLE_RECOVERY_MS = parseInt(process.env.C3_JSONL_IDLE_RECOVERY_MS || '90000', 10)
+// Hard cap: no session can run longer than this. Ultimate safety net.
+const MAX_SESSION_DURATION_MS = parseInt(process.env.C3_MAX_SESSION_DURATION_MS || '1800000', 10)
 
 export class SessionManager extends EventEmitter {
   private activeSessions = new Map<string, ActiveSession>()
   private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
   private lastEventTime = new Map<string, number>()
+  private sessionStartTime = new Map<string, number>()
   private stalledSessions = new Set<string>()
   private watchdogInterval: NodeJS.Timeout
 
@@ -46,31 +55,82 @@ export class SessionManager extends EventEmitter {
     const now = Date.now()
     for (const [sid, active] of this.activeSessions) {
       if (this.stalledSessions.has(sid)) continue
+
       const lastEvent = this.lastEventTime.get(sid) ?? now
-      const ageMs = now - lastEvent
-      if (ageMs > STALL_TIMEOUT_MS) {
-        console.warn(
-          `[SessionManager] Session ${sid} stalled: no SDK events for ${Math.round(ageMs / 1000)}s (timeout ${STALL_TIMEOUT_MS / 1000}s). Aborting.`
-        )
-        this.stalledSessions.add(sid)
+      const eventAgeMs = now - lastEvent
+
+      const sessionStart = this.sessionStartTime.get(sid) ?? now
+      const sessionAgeMs = now - sessionStart
+
+      // Independent disk-based signal: has the SDK stopped writing the session
+      // file? If yes, the agent is done regardless of what the iterator is doing.
+      let jsonlIdleMs: number | null = null
+      const jsonlPath = getSessionJSONLPath(sid)
+      if (jsonlPath) {
         try {
-          active.abortController.abort()
-        } catch (err) {
-          console.error(`[SessionManager] Abort failed for ${sid}:`, err)
+          jsonlIdleMs = now - statSync(jsonlPath).mtimeMs
+        } catch {
+          // ignore; file may not exist yet
         }
-        // In case abort does not propagate into the generator (observed with
-        // hung SDK streams), emit session_ended directly after a short grace
-        // period so the Slack/Discord reply still goes out.
-        setTimeout(() => {
-          if (this.activeSessions.has(sid)) {
-            console.warn(`[SessionManager] Session ${sid} did not exit after abort. Force-emitting session_ended.`)
-            this.activeSessions.delete(sid)
-            updateSession(sid, { status: 'error', errorMessage: 'stalled: no SDK events within timeout' })
-            this.emit('session_ended', sid, 'stalled')
-          }
-        }, 30_000)
       }
+
+      const isClassicStall = eventAgeMs > STALL_TIMEOUT_MS
+      const isHungIterator =
+        jsonlIdleMs !== null &&
+        jsonlIdleMs > JSONL_IDLE_RECOVERY_MS &&
+        eventAgeMs > JSONL_IDLE_RECOVERY_MS
+      const isOverMaxDuration = sessionAgeMs > MAX_SESSION_DURATION_MS
+
+      if (!isClassicStall && !isHungIterator && !isOverMaxDuration) continue
+
+      const reason = isHungIterator
+        ? 'hung-iterator-recovered'
+        : isOverMaxDuration
+          ? 'max-duration-exceeded'
+          : 'stalled'
+
+      console.warn(
+        `[SessionManager] Session ${sid} self-healing (${reason}): ` +
+          `eventAge=${Math.round(eventAgeMs / 1000)}s, ` +
+          `jsonlIdle=${jsonlIdleMs !== null ? Math.round(jsonlIdleMs / 1000) + 's' : 'n/a'}, ` +
+          `sessionAge=${Math.round(sessionAgeMs / 1000)}s`,
+      )
+      this.stalledSessions.add(sid)
+      try {
+        active.abortController.abort()
+      } catch (err) {
+        console.error(`[SessionManager] Abort failed for ${sid}:`, err)
+      }
+      // In case abort does not propagate into the generator, force-emit
+      // session_ended after a short grace period so Slack/Discord replies fire.
+      // For the hung-iterator case, the JSONL on disk already contains the full
+      // agent output, so listeners extracting a summary still get it.
+      setTimeout(() => {
+        if (this.activeSessions.has(sid)) {
+          console.warn(
+            `[SessionManager] Session ${sid} did not exit after abort. Force-emitting session_ended (${reason}).`,
+          )
+          this.activeSessions.delete(sid)
+          this.lastEventTime.delete(sid)
+          this.sessionStartTime.delete(sid)
+          const isRecovery = reason === 'hung-iterator-recovered'
+          updateSession(sid, {
+            status: isRecovery ? 'completed' : 'error',
+            ...(isRecovery ? {} : { errorMessage: `${reason}: no SDK events within timeout` }),
+          })
+          this.emit('session_ended', sid, reason)
+        }
+      }, 30_000)
     }
+  }
+
+  // Cleanup that every path out of a session must call, so the session-start
+  // map never leaks even if processMessages rejects synchronously.
+  private cleanupSessionState(sessionId: string) {
+    this.activeSessions.delete(sessionId)
+    this.lastEventTime.delete(sessionId)
+    this.sessionStartTime.delete(sessionId)
+    this.stalledSessions.delete(sessionId)
   }
 
   async startSession(params: StartSessionParams): Promise<string> {
@@ -134,10 +194,22 @@ export class SessionManager extends EventEmitter {
       abortController,
       projectPath,
     })
+    this.sessionStartTime.set(sessionId, Date.now())
 
-    this.processMessages(sessionId, q)
+    // Fire-and-forget, but catch rejections so a single bad session cannot
+    // silently break session_ended emission for every subsequent session.
+    this.processMessages(sessionId, q).catch((err) => this.onProcessMessagesRejection(sessionId, err))
 
     return sessionId
+  }
+
+  private onProcessMessagesRejection(sessionId: string, err: unknown) {
+    console.error(`[SessionManager] processMessages rejected for ${sessionId}:`, err)
+    if (!this.activeSessions.has(sessionId)) return
+    this.cleanupSessionState(sessionId)
+    const errMessage = err instanceof Error ? err.message : String(err)
+    updateSession(sessionId, { status: 'error', errorMessage: errMessage })
+    this.emit('session_ended', sessionId, errMessage)
   }
 
   async resumeSession(sessionId: string, prompt: string): Promise<void> {
@@ -193,6 +265,7 @@ export class SessionManager extends EventEmitter {
       abortController,
       projectPath,
     })
+    this.sessionStartTime.set(sessionId, Date.now())
 
     // Create/update CCC overlay entry
     if (sessionMeta) {
@@ -215,16 +288,14 @@ export class SessionManager extends EventEmitter {
       })
     }
 
-    this.processMessages(sessionId, q)
+    this.processMessages(sessionId, q).catch((err) => this.onProcessMessagesRejection(sessionId, err))
   }
 
   stopSession(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
     if (active) {
       active.query.close()
-      this.activeSessions.delete(sessionId)
-      this.lastEventTime.delete(sessionId)
-      this.stalledSessions.delete(sessionId)
+      this.cleanupSessionState(sessionId)
       updateSession(sessionId, { status: 'idle' })
       this.emit('session_ended', sessionId, 'stopped')
     }
@@ -282,18 +353,15 @@ export class SessionManager extends EventEmitter {
       }
 
       // Generator completed normally
-      this.activeSessions.delete(sessionId)
-      this.lastEventTime.delete(sessionId)
-      this.stalledSessions.delete(sessionId)
+      this.cleanupSessionState(sessionId)
       const currentSession = getSession(sessionId)
       if (!currentSession || !['completed', 'error'].includes(currentSession.status)) {
         updateSession(sessionId, { status: 'idle' })
       }
       this.emit('session_ended', sessionId, 'completed')
     } catch (error) {
-      this.activeSessions.delete(sessionId)
-      this.lastEventTime.delete(sessionId)
-      const wasStalled = this.stalledSessions.delete(sessionId)
+      const wasStalled = this.stalledSessions.has(sessionId)
+      this.cleanupSessionState(sessionId)
       const errorMessage = wasStalled
         ? 'stalled: SDK generator aborted after no events within timeout'
         : error instanceof Error ? error.message : 'Unknown error'
