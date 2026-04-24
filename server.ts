@@ -1,9 +1,35 @@
 import { createServer } from 'http'
 import { parse } from 'url'
+import fs from 'fs'
+import path from 'path'
 import next from 'next'
 import { WebSocketServer } from 'ws'
 import { verifyToken } from './src/lib/auth/jwt.js'
 import { handleConnection } from './src/lib/ws/handler.js'
+
+// Load .env.local into process.env. Next.js loads env files for its own code
+// paths, but webhook route handlers (src/app/api/webhooks/*) read process.env
+// directly and, for custom servers, not every key reliably makes it through.
+// Missing SLACK_BOT_TOKEN / DISCORD_BOT_TOKEN silently disables the bot-token
+// gate in the Slack webhook handler, which is how five alerts-backend-prod
+// replies and Nicoleta's intercom reply went missing on Apr 22-24.
+try {
+  const envPath = path.join(process.cwd(), '.env.local')
+  const envContent = fs.readFileSync(envPath, 'utf-8')
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx === -1) continue
+    const key = trimmed.slice(0, eqIdx)
+    const value = trimmed.slice(eqIdx + 1)
+    if (!process.env[key]) {
+      process.env[key] = value
+    }
+  }
+} catch {
+  // .env.local not found; rely on the process environment.
+}
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = '0.0.0.0'
