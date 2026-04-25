@@ -51,11 +51,34 @@ function findTriggersJson(): string {
   return path.join(process.cwd(), 'triggers.json')
 }
 
+function expandEnvVars(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (match, name) => {
+      const resolved = process.env[name]
+      if (resolved === undefined) {
+        console.warn(`[Slack Poller] Env var ${name} referenced in triggers.json is not set`)
+        return match
+      }
+      return resolved
+    })
+  }
+  if (Array.isArray(value)) return value.map(expandEnvVars)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = expandEnvVars(v)
+    }
+    return out
+  }
+  return value
+}
+
 function loadTriggers(): TriggersConfig {
   try {
     const triggersPath = findTriggersJson()
     console.log(`[Slack Poller] Loading config from ${triggersPath}`)
-    return JSON.parse(fs.readFileSync(triggersPath, 'utf-8'))
+    const raw = JSON.parse(fs.readFileSync(triggersPath, 'utf-8'))
+    return expandEnvVars(raw) as TriggersConfig
   } catch {
     return { slack: {} }
   }
