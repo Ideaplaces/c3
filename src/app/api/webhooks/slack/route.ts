@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { slackifyMarkdown } from 'slackify-markdown'
@@ -24,6 +25,14 @@ export async function POST(request: Request) {
 
   console.log(`[Slack Webhook] Trigger "${trigger.name}" fired in #${channelName}`)
 
+  // Generate the session ID up front so we can interpolate it into the prompt.
+  // Agents that need to self-link (e.g. in a DM) can use {{sessionId}},
+  // {{sessionUrl}}, and {{resumeCommand}} in their template.
+  const sessionId = randomUUID()
+  const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
+  const sessionUrl = `${baseUrl}/sessions/${sessionId}`
+  const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
+
   const prompt = loadPromptTemplate(trigger.prompt, {
     message,
     author: author || 'unknown',
@@ -31,9 +40,13 @@ export async function POST(request: Request) {
     channelId,
     messageTs: messageTs || '',
     timestamp: new Date().toISOString(),
+    sessionId,
+    sessionUrl,
+    resumeCommand,
   })
 
-  const sessionId = await sessionManager.startSession({
+  await sessionManager.startSession({
+    sessionId,
     projectPath: trigger.projectPath,
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
@@ -43,10 +56,10 @@ export async function POST(request: Request) {
   console.log(`[Slack Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
 
   const slackBotToken = trigger.slackBotToken || process.env.SLACK_BOT_TOKEN
-  const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
+  const replyInThread = trigger.replyInThread !== false
 
   // Immediately notify: session started (reply in thread)
-  if (slackBotToken && messageTs) {
+  if (slackBotToken && messageTs && replyInThread) {
     const startMessage = [
       `:robot_face: *Session started* (\`${sessionId.slice(0, 8)}\`)`,
       `Watch live: ${baseUrl}/sessions/${sessionId}`,
@@ -78,7 +91,7 @@ export async function POST(request: Request) {
   }
 
   // On completion: reply to the Slack thread with findings
-  if (slackBotToken && messageTs) {
+  if (slackBotToken && messageTs && replyInThread) {
     const onSessionEnded = (sid: string, reason: string) => {
       if (sid !== sessionId) return
       sessionManager.removeListener('session_ended', onSessionEnded)
@@ -90,7 +103,6 @@ export async function POST(request: Request) {
         summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
       )
 
-      const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
       const slackMessage = [
         `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
         '',

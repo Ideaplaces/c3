@@ -13,6 +13,11 @@ export interface ChannelTrigger {
 
 export interface SlackTrigger extends ChannelTrigger {
   slackBotToken?: string
+  // When false, the webhook handler skips posting "session started" and
+  // "investigation complete" replies in the alert channel thread. The agent
+  // is then responsible for delivering the result itself (e.g. as a DM).
+  // Defaults to true so existing Mentorly-style triggers keep their behavior.
+  replyInThread?: boolean
 }
 
 export interface CronTrigger {
