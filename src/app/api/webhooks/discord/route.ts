@@ -1,5 +1,6 @@
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
+import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
 
 export async function POST(request: Request) {
   // Verify shared secret
@@ -54,6 +55,9 @@ export async function POST(request: Request) {
     sessionManager.removeListener('session_ended', onSessionEnded)
     console.log(`[Webhook] Session ${sessionId} ended (${reason})`)
 
+    const events = sessionManager.getBufferedEvents(sessionId)
+    const failure = detectSessionFailure(events, reason)
+
     // Extract summary from buffered events
     const summary = extractSummary(sessionId, reason)
 
@@ -61,17 +65,30 @@ export async function POST(request: Request) {
     if (discordBotToken && messageId) {
       const baseUrl = process.env.C3_BASE_URL || 'http://localhost:8347'
       const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
-      const replyContent = [
-        `**Session completed** (\`${sessionId.slice(0, 8)}\`)`,
-        '',
-        summary.length > 1800 ? summary.slice(0, 1800) + '...' : summary,
-        '',
-        `View full session: ${baseUrl}/sessions/${sessionId}`,
-        `Resume in terminal:`,
-        '```',
-        resumeCommand,
-        '```',
-      ].join('\n')
+      const replyContent = failure.failed
+        ? [
+            `:warning: **Agent session failed** (\`${sessionId.slice(0, 8)}\`)`,
+            '',
+            `**Reason:** ${failure.reason.length > 1500 ? failure.reason.slice(0, 1500) + '...' : failure.reason}`,
+            '',
+            `**Take over this session:**`,
+            `Browser: ${baseUrl}/sessions/${sessionId}`,
+            `Resume in terminal:`,
+            '```',
+            resumeCommand,
+            '```',
+          ].join('\n')
+        : [
+            `**Session completed** (\`${sessionId.slice(0, 8)}\`)`,
+            '',
+            summary.length > 1800 ? summary.slice(0, 1800) + '...' : summary,
+            '',
+            `View full session: ${baseUrl}/sessions/${sessionId}`,
+            `Resume in terminal:`,
+            '```',
+            resumeCommand,
+            '```',
+          ].join('\n')
 
       // Reply to the original message
       fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {

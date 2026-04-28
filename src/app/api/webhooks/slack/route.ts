@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { slackifyMarkdown } from 'slackify-markdown'
+import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('Authorization')
@@ -90,34 +91,61 @@ export async function POST(request: Request) {
       .catch(err => console.error(`[Slack Webhook] Start notification error:`, err))
   }
 
-  // On completion: reply to the Slack thread with findings
-  if (slackBotToken && messageTs && replyInThread) {
+  // On completion: reply to the Slack thread with findings, OR with a failure
+  // notice if the session died before producing meaningful output. The failure
+  // notice ALWAYS posts (even when replyInThread is false) so a silent agent
+  // crash never goes unseen — Chip will not silently fail.
+  if (slackBotToken && messageTs) {
     const onSessionEnded = (sid: string, reason: string) => {
       if (sid !== sessionId) return
       sessionManager.removeListener('session_ended', onSessionEnded)
-      console.log(`[Slack Webhook] Session ${sessionId} ended (${reason}), replying to Slack`)
+      console.log(`[Slack Webhook] Session ${sessionId} ended (${reason})`)
 
-      const summary = extractSummary(sessionId, reason)
+      const events = sessionManager.getBufferedEvents(sessionId)
+      const failure = detectSessionFailure(events, reason)
 
-      const slackSummary = slackifyMarkdown(
-        summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
-      )
+      if (!failure.failed && !replyInThread) {
+        // Trigger handles its own DM; nothing to post here.
+        return
+      }
 
-      const slackMessage = [
-        `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
-        '',
-        slackSummary,
-        '',
-        `*Continue this conversation:*`,
-        `Browser: ${baseUrl}/sessions/${sessionId}`,
-        `Resume in terminal:`,
-        '```',
-        resumeCommand,
-        '```',
-      ].join('\n')
+      let slackMessage: string
+      if (failure.failed) {
+        const reasonText = failure.reason.length > 1500
+          ? failure.reason.slice(0, 1500) + '...'
+          : failure.reason
+        slackMessage = [
+          `:warning: *Agent session failed* (\`${sessionId.slice(0, 8)}\`)`,
+          '',
+          `*Reason:* ${reasonText}`,
+          '',
+          `*Take over this session:*`,
+          `Browser: ${baseUrl}/sessions/${sessionId}`,
+          `Resume in terminal:`,
+          '```',
+          resumeCommand,
+          '```',
+        ].join('\n')
+      } else {
+        const summary = extractSummary(sessionId, reason)
+        const slackSummary = slackifyMarkdown(
+          summary.length > 2500 ? summary.slice(0, 2500) + '...' : summary
+        )
+        slackMessage = [
+          `*Agent Investigation Complete* (\`${sessionId.slice(0, 8)}\`)`,
+          '',
+          slackSummary,
+          '',
+          `*Continue this conversation:*`,
+          `Browser: ${baseUrl}/sessions/${sessionId}`,
+          `Resume in terminal:`,
+          '```',
+          resumeCommand,
+          '```',
+        ].join('\n')
+      }
 
-      // Reply in thread (thread_ts = original message timestamp)
-      console.log(`[Slack Webhook] Replying in thread: channel=${channelId} thread_ts=${messageTs}`)
+      console.log(`[Slack Webhook] Replying in thread: channel=${channelId} thread_ts=${messageTs} failed=${failure.failed}`)
       fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
@@ -135,7 +163,7 @@ export async function POST(request: Request) {
         .then(res => res.json())
         .then((data: Record<string, unknown>) => {
           if (data.ok) {
-            console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId} (thread_ts=${messageTs})`)
+            console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId} (thread_ts=${messageTs}, failed=${failure.failed})`)
           } else {
             console.error(`[Slack Webhook] Slack reply failed:`, data.error, `thread_ts=${messageTs}`)
           }
