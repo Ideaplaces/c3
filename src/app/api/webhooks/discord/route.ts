@@ -1,4 +1,5 @@
 import { sessionManager } from '@/lib/sdk/session-manager'
+import { DEFAULT_MODEL } from '@/lib/models'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
 
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
     projectPath: trigger.projectPath,
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
-    model: trigger.model || 'claude-opus-4-6',
+    model: trigger.model || DEFAULT_MODEL,
   })
 
   console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)

@@ -7,6 +7,7 @@ import { createSession, updateSession, getSession } from '@/lib/store/sessions'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
+import { DEFAULT_MODEL } from '@/lib/models'
 
 interface ActiveSession {
   id: string
@@ -177,7 +178,7 @@ export class SessionManager extends EventEmitter {
       machineName: hostname(),
       status: 'running',
       permissionMode,
-      model: model || 'claude-opus-4-6',
+      model: model || DEFAULT_MODEL,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       turnCount: 0,

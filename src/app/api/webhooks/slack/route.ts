@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { sessionManager } from '@/lib/sdk/session-manager'
+import { DEFAULT_MODEL } from '@/lib/models'
 import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { slackifyMarkdown } from 'slackify-markdown'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     projectPath: trigger.projectPath,
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
-    model: trigger.model || 'claude-opus-4-6',
+    model: trigger.model || DEFAULT_MODEL,
   })
 
   console.log(`[Slack Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
