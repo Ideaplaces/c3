@@ -5,4 +5,5 @@
  * Discord/Slack/cron webhooks) falls back to this when no model is specified.
  * Override at runtime with the C3_DEFAULT_MODEL env var; change the baseline here.
  */
-export const DEFAULT_MODEL = process.env.C3_DEFAULT_MODEL || 'claude-opus-4-8'
+// The [1m] suffix enables the 1M-token context beta window for Opus 4.8.
+export const DEFAULT_MODEL = process.env.C3_DEFAULT_MODEL || 'claude-opus-4-8[1m]'
