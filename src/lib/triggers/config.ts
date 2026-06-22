@@ -62,6 +62,28 @@ const PROMPTS_DIR = path.join(CONFIG_DIR, 'prompts')
 let cachedConfig: TriggersConfig | null = null
 let cachedMtime: number = 0
 
+export function expandEnvVars(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_match, name) => {
+      const resolved = process.env[name]
+      if (resolved === undefined) {
+        console.warn(`[Config] Env var ${name} referenced in triggers.json is not set`)
+        return _match
+      }
+      return resolved
+    })
+  }
+  if (Array.isArray(value)) return value.map(expandEnvVars)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = expandEnvVars(v)
+    }
+    return out
+  }
+  return value
+}
+
 export function loadTriggersConfig(): TriggersConfig {
   try {
     const stat = fs.statSync(TRIGGERS_PATH)
@@ -69,7 +91,7 @@ export function loadTriggersConfig(): TriggersConfig {
       return cachedConfig
     }
     const raw = fs.readFileSync(TRIGGERS_PATH, 'utf-8')
-    cachedConfig = JSON.parse(raw) as TriggersConfig
+    cachedConfig = expandEnvVars(JSON.parse(raw)) as TriggersConfig
     cachedMtime = stat.mtimeMs
     return cachedConfig
   } catch {
