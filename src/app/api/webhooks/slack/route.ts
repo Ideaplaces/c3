@@ -4,6 +4,7 @@ import { DEFAULT_MODEL } from '@/lib/models'
 import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { slackifyMarkdown } from 'slackify-markdown'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
+import { resolveSlackToken } from '@/lib/webhooks/resolve-slack-token'
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('Authorization')
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
 
   console.log(`[Slack Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
 
-  const slackBotToken = trigger.slackBotToken || process.env.SLACK_BOT_TOKEN
+  const slackBotToken = resolveSlackToken(trigger.slackBotToken)
   const replyInThread = trigger.replyInThread !== false
 
   // Immediately notify: session started (reply in thread)
@@ -166,7 +167,10 @@ export async function POST(request: Request) {
           if (data.ok) {
             console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId} (thread_ts=${messageTs}, failed=${failure.failed})`)
           } else {
-            console.error(`[Slack Webhook] Slack reply failed:`, data.error, `thread_ts=${messageTs}`)
+            console.error(
+              `[Slack Webhook] Slack reply failed: ${data.error} thread_ts=${messageTs}` +
+              ` trigger=${trigger.name} token_prefix=${slackBotToken?.slice(0, 12)}...`,
+            )
           }
         })
         .catch(err => console.error(`[Slack Webhook] Slack reply error:`, err))
