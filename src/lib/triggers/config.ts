@@ -18,6 +18,10 @@ export interface SlackTrigger extends ChannelTrigger {
   // is then responsible for delivering the result itself (e.g. as a DM).
   // Defaults to true so existing Mentorly-style triggers keep their behavior.
   replyInThread?: boolean
+  // Slack user ID that receives C3's own notifications (session start,
+  // failure) when replyInThread is false. Without it, those notices fall
+  // back to the alert channel thread.
+  notifyUserId?: string
 }
 
 export interface CronTrigger {

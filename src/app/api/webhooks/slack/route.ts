@@ -5,6 +5,10 @@ import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { slackifyMarkdown } from 'slackify-markdown'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
 import { resolveSlackToken } from '@/lib/webhooks/resolve-slack-token'
+import {
+  openDirectMessageChannel,
+  resolveNotificationDestination,
+} from '@/lib/webhooks/notification-destination'
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('Authorization')
@@ -60,6 +64,10 @@ export async function POST(request: Request) {
 
   const slackBotToken = resolveSlackToken(trigger.slackBotToken)
   const replyInThread = trigger.replyInThread !== false
+  const destination = resolveNotificationDestination({
+    replyInThread,
+    notifyUserId: trigger.notifyUserId,
+  })
 
   // Immediately notify: session started (reply in thread)
   if (slackBotToken && messageTs && replyInThread) {
@@ -95,14 +103,20 @@ export async function POST(request: Request) {
 
   // On completion: reply to the Slack thread with findings, OR with a failure
   // notice if the session died before producing meaningful output. The failure
-  // notice ALWAYS posts (even when replyInThread is false) so a silent agent
-  // crash never goes unseen — Chip will not silently fail.
+  // notice ALWAYS goes out (even when replyInThread is false) so a silent agent
+  // crash never goes unseen — but on a DM-only trigger it goes to the DM, not
+  // into the shared alert channel where the whole team reads it.
   if (slackBotToken && messageTs) {
     const onSessionEnded = (sid: string, reason: string) => {
       if (sid !== sessionId) return
       sessionManager.removeListener('session_ended', onSessionEnded)
       console.log(`[Slack Webhook] Session ${sessionId} ended (${reason})`)
+      void postSessionNotice(reason).catch(err =>
+        console.error(`[Slack Webhook] Notice handling error for ${sessionId}:`, err),
+      )
+    }
 
+    const postSessionNotice = async (reason: string) => {
       const events = sessionManager.getBufferedEvents(sessionId)
       const failure = detectSessionFailure(events, reason)
 
@@ -118,6 +132,9 @@ export async function POST(request: Request) {
           : failure.reason
         slackMessage = [
           `:warning: *Agent session failed* (\`${sessionId.slice(0, 8)}\`)`,
+          ...(destination.kind === 'dm'
+            ? [`Trigger: \`${trigger.name}\` in #${channelName || trigger.name}`]
+            : []),
           '',
           `*Reason:* ${reasonText}`,
           '',
@@ -147,7 +164,29 @@ export async function POST(request: Request) {
         ].join('\n')
       }
 
-      console.log(`[Slack Webhook] Replying in thread: channel=${channelId} thread_ts=${messageTs} failed=${failure.failed}`)
+      // A DM-only trigger keeps its notices out of the alert channel entirely.
+      // If opening the IM fails we still fall back to the thread rather than
+      // dropping a failure notice on the floor.
+      let targetChannel = channelId
+      let targetThreadTs: string | undefined = messageTs
+      if (destination.kind === 'dm') {
+        const dmChannel = await openDirectMessageChannel(slackBotToken, destination.userId)
+        if (dmChannel) {
+          targetChannel = dmChannel
+          targetThreadTs = undefined
+        } else {
+          console.error(
+            `[Slack Webhook] Could not open DM with ${destination.userId};` +
+            ` falling back to thread in ${channelId}`,
+          )
+        }
+      }
+
+      const asDm = targetThreadTs === undefined
+      console.log(
+        `[Slack Webhook] Posting notice: channel=${targetChannel} dm=${asDm}` +
+        ` thread_ts=${targetThreadTs ?? 'none'} failed=${failure.failed}`,
+      )
       fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
@@ -155,9 +194,8 @@ export async function POST(request: Request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          channel: channelId,
-          thread_ts: messageTs,
-          reply_broadcast: false,
+          channel: targetChannel,
+          ...(targetThreadTs ? { thread_ts: targetThreadTs, reply_broadcast: false } : {}),
           text: slackMessage,
           unfurl_links: false,
         }),
@@ -165,15 +203,15 @@ export async function POST(request: Request) {
         .then(res => res.json())
         .then((data: Record<string, unknown>) => {
           if (data.ok) {
-            console.log(`[Slack Webhook] Replied in Slack thread for session ${sessionId} (thread_ts=${messageTs}, failed=${failure.failed})`)
+            console.log(`[Slack Webhook] Posted notice for session ${sessionId} (channel=${targetChannel}, dm=${asDm}, failed=${failure.failed})`)
           } else {
             console.error(
-              `[Slack Webhook] Slack reply failed: ${data.error} thread_ts=${messageTs}` +
+              `[Slack Webhook] Slack post failed: ${data.error} channel=${targetChannel} dm=${asDm}` +
               ` trigger=${trigger.name} token_prefix=${slackBotToken?.slice(0, 12)}...`,
             )
           }
         })
-        .catch(err => console.error(`[Slack Webhook] Slack reply error:`, err))
+        .catch(err => console.error(`[Slack Webhook] Slack post error:`, err))
     }
 
     sessionManager.on('session_ended', onSessionEnded)
