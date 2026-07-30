@@ -89,6 +89,9 @@ export function extractFullText(msg: SlackMessage): string {
 export const PROCESSED_REACTION = 'eyes'
 export const COOLDOWN_MS = 5 * 60 * 1000
 
+/** How many processed timestamps to retain per channel in the local ledger. */
+export const MAX_PROCESSED_HISTORY = 200
+
 /**
  * Filter messages to only those the poller should consider processing.
  * This is the first line of defense against loops.
@@ -107,6 +110,34 @@ export function filterCandidates(messages: SlackMessage[], oldestTs: string): Sl
 export function hasProcessedReaction(message: SlackMessage): boolean {
   if (!message.reactions) return false
   return message.reactions.some(r => r.name === PROCESSED_REACTION)
+}
+
+/**
+ * Local processed-message ledger, used by triggers that run with
+ * `noReaction: true`. Those channels are shared with the team, where a 👀 on an
+ * alert reads as "a human is handling this" when nobody is, so the poller must
+ * not write to the channel at all. The ledger replaces the reaction as the
+ * idempotency marker.
+ */
+export function isProcessed(processedTs: string[] | undefined, ts: string): boolean {
+  if (!processedTs) return false
+  return processedTs.includes(ts)
+}
+
+/**
+ * Record a timestamp as processed, keeping only the newest
+ * MAX_PROCESSED_HISTORY entries. Returns a new array; never mutates the input.
+ */
+export function markProcessed(
+  processedTs: string[] | undefined,
+  ts: string,
+  max: number = MAX_PROCESSED_HISTORY,
+): string[] {
+  const existing = processedTs || []
+  if (existing.includes(ts)) return existing
+  return [...existing, ts]
+    .sort((a, b) => parseFloat(a) - parseFloat(b))
+    .slice(-max)
 }
 
 /**
@@ -129,15 +160,21 @@ export function checkCooldown(
 /**
  * Determine if a message should be processed.
  * Returns { process: true } or { process: false, reason: string }.
+ *
+ * Pass `dedup` for triggers that do not use the 👀 reaction: the local ledger
+ * of processed timestamps then decides, instead of reactions on the message.
  */
 export function shouldProcessMessage(
   message: SlackMessage,
   channelId: string,
   lastSessionTimes: Map<string, number>,
-  now: number = Date.now()
+  now: number = Date.now(),
+  dedup?: { processedTs: string[] | undefined }
 ): { process: boolean; reason?: string } {
-  // Check 👀 reaction
-  if (hasProcessedReaction(message)) {
+  const alreadyProcessed = dedup
+    ? isProcessed(dedup.processedTs, message.ts)
+    : hasProcessedReaction(message)
+  if (alreadyProcessed) {
     return { process: false, reason: 'already_processed' }
   }
 

@@ -5,7 +5,10 @@ import {
   checkCooldown,
   shouldProcessMessage,
   extractFullText,
+  isProcessed,
+  markProcessed,
   COOLDOWN_MS,
+  MAX_PROCESSED_HISTORY,
   PROCESSED_REACTION,
   type SlackMessage,
 } from '@/lib/slack-poller/logic'
@@ -272,6 +275,80 @@ describe('shouldProcessMessage', () => {
       'C123', times, now + 6 * 60_000
     )
     expect(result3.process).toBe(true)
+  })
+
+  it('dedups off the ledger, not the reaction, when a ledger is supplied', () => {
+    const msg = makeMsg({ ts: '1774700005.000000' })
+    const seen = { processedTs: ['1774700005.000000'] }
+    expect(shouldProcessMessage(msg, 'C123', new Map(), Date.now(), seen)).toEqual({
+      process: false,
+      reason: 'already_processed',
+    })
+  })
+
+  it('processes a reaction-free message that is absent from the ledger', () => {
+    const msg = makeMsg({ ts: '1774700006.000000' })
+    const seen = { processedTs: ['1774700005.000000'] }
+    expect(shouldProcessMessage(msg, 'C123', new Map(), Date.now(), seen).process).toBe(true)
+  })
+
+  it('ignores a stale reaction when running in ledger mode', () => {
+    // A 👀 left on the message before the channel went reaction-free must not
+    // suppress it; only the ledger decides.
+    const msg = makeMsg({
+      ts: '1774700007.000000',
+      reactions: [{ name: PROCESSED_REACTION, users: ['U1'] }],
+    })
+    expect(
+      shouldProcessMessage(msg, 'C123', new Map(), Date.now(), { processedTs: [] }).process,
+    ).toBe(true)
+  })
+})
+
+describe('processed ledger', () => {
+  it('reports a recorded timestamp as processed', () => {
+    expect(isProcessed(['1.0', '2.0'], '2.0')).toBe(true)
+  })
+
+  it('reports an unknown or unset ledger as not processed', () => {
+    expect(isProcessed(['1.0'], '2.0')).toBe(false)
+    expect(isProcessed(undefined, '2.0')).toBe(false)
+  })
+
+  it('appends a new timestamp without mutating the input', () => {
+    const original = ['1.0']
+    const next = markProcessed(original, '2.0')
+    expect(next).toEqual(['1.0', '2.0'])
+    expect(original).toEqual(['1.0'])
+  })
+
+  it('is idempotent for a timestamp already recorded', () => {
+    expect(markProcessed(['1.0', '2.0'], '2.0')).toEqual(['1.0', '2.0'])
+  })
+
+  it('starts a ledger from undefined', () => {
+    expect(markProcessed(undefined, '1.0')).toEqual(['1.0'])
+  })
+
+  it('keeps the newest entries and drops the oldest past the cap', () => {
+    const full = Array.from({ length: 5 }, (_, i) => `${1774700000 + i}.000000`)
+    const next = markProcessed(full, '1774700009.000000', 3)
+    expect(next).toEqual(['1774700003.000000', '1774700004.000000', '1774700009.000000'])
+  })
+
+  it('orders by numeric timestamp so out-of-order arrivals do not evict newer entries', () => {
+    // '1774700010.000000' sorts before '1774700009.000000' as a string.
+    const next = markProcessed(['1774700010.000000'], '1774700009.000000', 2)
+    expect(next).toEqual(['1774700009.000000', '1774700010.000000'])
+  })
+
+  it('caps the ledger at MAX_PROCESSED_HISTORY by default', () => {
+    let ledger: string[] = []
+    for (let i = 0; i < MAX_PROCESSED_HISTORY + 25; i++) {
+      ledger = markProcessed(ledger, `${1774700000 + i}.000000`)
+    }
+    expect(ledger).toHaveLength(MAX_PROCESSED_HISTORY)
+    expect(ledger[ledger.length - 1]).toBe(`${1774700000 + MAX_PROCESSED_HISTORY + 24}.000000`)
   })
 })
 

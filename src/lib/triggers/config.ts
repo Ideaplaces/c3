@@ -22,6 +22,9 @@ export interface SlackTrigger extends ChannelTrigger {
   // failure) when replyInThread is false. Without it, those notices fall
   // back to the alert channel thread.
   notifyUserId?: string
+  // When true, the poller adds no 👀 marker to the alert message and dedups
+  // from its local ledger instead. See slack-poller.ts.
+  noReaction?: boolean
 }
 
 export interface CronTrigger {

@@ -30,6 +30,11 @@ interface SlackTrigger {
   model: string
   slackBotToken?: string
   pollIntervalMs?: number
+  // When true, the poller never writes to the channel: no 👀 marker on the
+  // alert. Dedup falls back to the local processed ledger in the state file.
+  // Used on channels shared with a team, where a reaction reads as "someone is
+  // handling this" when nobody is.
+  noReaction?: boolean
 }
 
 interface TriggersConfig {
@@ -93,13 +98,17 @@ const STATE_FILE = path.join(process.env.HOME || '/tmp', '.ccc', 'data', 'slack-
 
 interface PollerState {
   lastTs: Record<string, string>
+  // Processed message timestamps per channel, for triggers running with
+  // noReaction: true (no 👀 marker to read back from Slack).
+  processed?: Record<string, string[]>
 }
 
 function loadState(): PollerState {
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as PollerState
+    return { lastTs: parsed.lastTs || {}, processed: parsed.processed || {} }
   } catch {
-    return { lastTs: {} }
+    return { lastTs: {}, processed: {} }
   }
 }
 
@@ -113,6 +122,8 @@ import {
   filterCandidates,
   shouldProcessMessage,
   extractFullText,
+  isProcessed,
+  markProcessed,
   PROCESSED_REACTION,
   type SlackMessage,
 } from './src/lib/slack-poller/logic.js'
@@ -168,6 +179,9 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     return
   }
 
+  // Reaction-free triggers dedup off the local ledger instead of the 👀 marker.
+  const useReaction = trigger.noReaction !== true
+
   const oldest = state.lastTs[trigger.channelId] || ''
   const url = `https://slack.com/api/conversations.history?channel=${trigger.channelId}&limit=10${oldest ? `&oldest=${oldest}` : ''}`
 
@@ -186,20 +200,44 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
 
   if (candidates.length === 0) return
 
+  // First sight of a reaction-free channel (no stored lastTs, e.g. a wiped
+  // state file): seed to the newest message and process nothing. With no 👀 on
+  // past alerts there is nothing in Slack to tell us they were already handled,
+  // so replaying history would re-investigate old alerts.
+  if (!oldest && !useReaction) {
+    const newestTs = candidates[candidates.length - 1].ts
+    state.lastTs[trigger.channelId] = newestTs
+    saveState(state)
+    console.log(
+      `[Slack Poller] Seeded ${trigger.name} at ${newestTs} without processing` +
+      ` ${candidates.length} historical message(s) (no reaction marker to dedup against)`
+    )
+    return
+  }
+
   for (const msg of candidates) {
     // Update last seen timestamp regardless of whether we process it
     state.lastTs[trigger.channelId] = msg.ts
     saveState(state)
 
-    // Check if already processed via Slack API (reaction check)
-    const alreadyProcessed = await hasBeenProcessed(token, trigger.channelId, msg.ts)
+    // Check if already processed: the 👀 reaction via the Slack API, or the
+    // local ledger for channels the poller must not write to.
+    const alreadyProcessed = useReaction
+      ? await hasBeenProcessed(token, trigger.channelId, msg.ts)
+      : isProcessed(state.processed?.[trigger.channelId], msg.ts)
     if (alreadyProcessed) {
       console.log(`[Slack Poller] Skipping already-processed message ${msg.ts}`)
       continue
     }
 
     // Check rate limit (uses tested shouldProcessMessage logic)
-    const decision = shouldProcessMessage(msg, trigger.channelId, lastSessionTime)
+    const decision = shouldProcessMessage(
+      msg,
+      trigger.channelId,
+      lastSessionTime,
+      Date.now(),
+      useReaction ? undefined : { processedTs: state.processed?.[trigger.channelId] },
+    )
     if (!decision.process) {
       console.log(`[Slack Poller] Skipping message ${msg.ts}: ${decision.reason}`)
       continue
@@ -264,13 +302,24 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       console.log(`[Slack Poller] Session started: ${sessionId}`)
       lastSessionTime.set(trigger.channelId, Date.now())
       // Only mark the Slack message as processed after c3 confirms a session.
-      await markAsProcessed(token, trigger.channelId, msg.ts)
+      if (useReaction) {
+        await markAsProcessed(token, trigger.channelId, msg.ts)
+      } else {
+        if (!state.processed) state.processed = {}
+        state.processed[trigger.channelId] = markProcessed(
+          state.processed[trigger.channelId],
+          msg.ts,
+        )
+        saveState(state)
+      }
     } else {
       console.error(
-        `[Slack Poller] Webhook failed for ${trigger.name} msg ${msg.ts}: ${failureReason}. Leaving :eyes: off so it is visible as unprocessed.`
+        `[Slack Poller] Webhook failed for ${trigger.name} msg ${msg.ts}: ${failureReason}.` +
+        ` Not marking processed so it is visible as unhandled.`
       )
-      // Do NOT mark as processed. lastTs has already advanced so we don't re-fetch,
-      // but the absent :eyes: reaction flags the message for human attention.
+      // Do NOT mark as processed. lastTs has already advanced so we don't re-fetch;
+      // on reaction channels the absent :eyes: flags the message for human
+      // attention, and on reaction-free channels this error log is the signal.
     }
   }
 }
