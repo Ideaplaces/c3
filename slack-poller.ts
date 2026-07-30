@@ -200,21 +200,6 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
 
   if (candidates.length === 0) return
 
-  // First sight of a reaction-free channel (no stored lastTs, e.g. a wiped
-  // state file): seed to the newest message and process nothing. With no 👀 on
-  // past alerts there is nothing in Slack to tell us they were already handled,
-  // so replaying history would re-investigate old alerts.
-  if (!oldest && !useReaction) {
-    const newestTs = candidates[candidates.length - 1].ts
-    state.lastTs[trigger.channelId] = newestTs
-    saveState(state)
-    console.log(
-      `[Slack Poller] Seeded ${trigger.name} at ${newestTs} without processing` +
-      ` ${candidates.length} historical message(s) (no reaction marker to dedup against)`
-    )
-    return
-  }
-
   for (const msg of candidates) {
     // Update last seen timestamp regardless of whether we process it
     state.lastTs[trigger.channelId] = msg.ts
