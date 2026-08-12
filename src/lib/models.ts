@@ -5,5 +5,6 @@
  * Discord/Slack/cron webhooks) falls back to this when no model is specified.
  * Override at runtime with the C3_DEFAULT_MODEL env var; change the baseline here.
  */
-// The [1m] suffix enables the 1M-token context beta window for Opus 4.8.
-export const DEFAULT_MODEL = process.env.C3_DEFAULT_MODEL || 'claude-opus-4-8[1m]'
+// Fable 5's context window is 1M tokens by default, so no [1m] suffix is
+// needed (unlike Opus 4.8, where the suffix enabled the 1M context beta).
+export const DEFAULT_MODEL = process.env.C3_DEFAULT_MODEL || 'claude-fable-5'
