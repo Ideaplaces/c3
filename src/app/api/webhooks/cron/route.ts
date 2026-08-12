@@ -30,6 +30,7 @@ export async function POST(request: Request) {
   // Discord/Slack messages) include a "resume in terminal" command that
   // points at the right session.
   const sessionId = randomUUID()
+  const resumeCommand = `cd ${trigger.projectPath} && claude --resume ${sessionId} --dangerously-skip-permissions`
 
   const prompt = loadPromptTemplate(trigger.prompt, {
     schedule: schedule || trigger.schedule,
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     triggerName: trigger.name,
     sessionId,
     projectPath: trigger.projectPath,
+    resumeCommand,
   })
 
   await sessionManager.startSession({
