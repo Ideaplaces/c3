@@ -2,9 +2,9 @@ import { query, type Query, type SDKMessage, type Options } from '@anthropic-ai/
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { hostname } from 'os'
-import { statSync } from 'fs'
+
 import { createSession, updateSession, getSession } from '@/lib/store/sessions'
-import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+import { getSessionJSONLPath, getSessionLastActivityMs } from '@/lib/claude-sessions/scanner'
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
 import { DEFAULT_MODEL } from '@/lib/models'
@@ -65,14 +65,15 @@ export class SessionManager extends EventEmitter {
 
       // Independent disk-based signal: has the SDK stopped writing the session
       // file? If yes, the agent is done regardless of what the iterator is doing.
+      //
+      // This counts subagent transcripts too. A session that delegates with the
+      // Task tool writes nothing to its own JSONL while the subagent runs, so
+      // looking at the parent file alone reports a working session as hung and
+      // kills it mid-investigation.
       let jsonlIdleMs: number | null = null
-      const jsonlPath = getSessionJSONLPath(sid)
-      if (jsonlPath) {
-        try {
-          jsonlIdleMs = now - statSync(jsonlPath).mtimeMs
-        } catch {
-          // ignore; file may not exist yet
-        }
+      const lastActivityMs = getSessionLastActivityMs(sid)
+      if (lastActivityMs !== null) {
+        jsonlIdleMs = now - lastActivityMs
       }
 
       const isClassicStall = eventAgeMs > STALL_TIMEOUT_MS

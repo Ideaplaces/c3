@@ -282,6 +282,46 @@ export function getSessionJSONLPath(sessionId: string): string | null {
 }
 
 /**
+ * Most recent write across a session's own transcript AND any subagent
+ * transcripts it spawned, as an epoch ms, or null when nothing is on disk yet.
+ *
+ * A session that delegates work with the Task tool goes quiet in its own
+ * JSONL: the subagent writes to <sessionId>/subagents/*.jsonl instead. Judging
+ * liveness from the parent file alone therefore reads a busy session as hung.
+ * That is not hypothetical: a support investigation was killed two minutes in
+ * while its subagent was still writing (parent idle 125s, subagent last write
+ * 2s before the kill).
+ */
+export function getSessionLastActivityMs(sessionId: string): number | null {
+  const jsonlPath = getSessionJSONLPath(sessionId)
+  if (!jsonlPath) return null
+
+  let newest: number | null = null
+  const consider = (path: string) => {
+    try {
+      const { mtimeMs } = statSync(path)
+      if (newest === null || mtimeMs > newest) newest = mtimeMs
+    } catch {
+      // ignore unreadable entries
+    }
+  }
+
+  consider(jsonlPath)
+
+  // Sibling directory named after the session, holding one file per subagent.
+  const subagentsDir = join(jsonlPath.replace(/\.jsonl$/, ''), 'subagents')
+  try {
+    for (const name of readdirSync(subagentsDir)) {
+      consider(join(subagentsDir, name))
+    }
+  } catch {
+    // no subagents for this session
+  }
+
+  return newest
+}
+
+/**
  * Convert a ClaudeSessionEntry to the SessionMeta format CCC uses.
  */
 export function entryToSessionMeta(entry: ClaudeSessionEntry) {
