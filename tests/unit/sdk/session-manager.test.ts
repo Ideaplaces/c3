@@ -117,6 +117,45 @@ describe('SessionManager', () => {
       expect(session!.projectPath).toBe('/home/user/project')
       expect(session!.status).toBe('completed')
     })
+
+    it('pins the default model in the SDK options when the caller specifies none', async () => {
+      const { DEFAULT_MODEL } = await import('@/lib/models')
+      mockMessages = [
+        { type: 'system', subtype: 'init', session_id: 'ccc-uuid-1234', model: DEFAULT_MODEL, permissionMode: 'bypassPermissions', tools: [], cwd: '/test' },
+      ]
+
+      await manager.startSession({
+        projectPath: '/home/user/project',
+        prompt: 'hello',
+        permissionMode: 'bypassPermissions',
+      })
+
+      const callArgs = queryCallArgs[0] as [{ options: { model: string } }]
+      expect(callArgs[0].options.model).toBe(DEFAULT_MODEL)
+      expect(DEFAULT_MODEL).toBe('claude-opus-5[1m]')
+
+      await new Promise((r) => setTimeout(r, 50))
+      expect(getSession('ccc-uuid-1234')!.model).toBe(DEFAULT_MODEL)
+    })
+
+    it('honours an explicit model over the default', async () => {
+      mockMessages = [
+        { type: 'system', subtype: 'init', session_id: 'ccc-uuid-1234', model: 'claude-fable-5', permissionMode: 'bypassPermissions', tools: [], cwd: '/test' },
+      ]
+
+      await manager.startSession({
+        projectPath: '/home/user/project',
+        prompt: 'hello',
+        permissionMode: 'bypassPermissions',
+        model: 'claude-fable-5',
+      })
+
+      const callArgs = queryCallArgs[0] as [{ options: { model: string } }]
+      expect(callArgs[0].options.model).toBe('claude-fable-5')
+
+      await new Promise((r) => setTimeout(r, 50))
+      expect(getSession('ccc-uuid-1234')!.model).toBe('claude-fable-5')
+    })
   })
 
   describe('resumeSession', () => {

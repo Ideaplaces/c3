@@ -137,6 +137,9 @@ export class SessionManager extends EventEmitter {
   async startSession(params: StartSessionParams): Promise<string> {
     const { projectPath, prompt, permissionMode, model } = params
     const sessionId = params.sessionId ?? randomUUID()
+    // Always pin the model explicitly. Without this the SDK falls back to the
+    // CLI's own default, which drifts from what we record and show for the session.
+    const resolvedModel = model || DEFAULT_MODEL
     const abortController = new AbortController()
 
     // Strip CLAUDECODE env var to allow nested SDK sessions
@@ -157,7 +160,7 @@ export class SessionManager extends EventEmitter {
       settingSources: ['project'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       env: cleanEnv,
-      ...(model && { model }),
+      model: resolvedModel,
     }
 
     // Default to bypass. Can be overridden by the client.
@@ -178,7 +181,7 @@ export class SessionManager extends EventEmitter {
       machineName: hostname(),
       status: 'running',
       permissionMode,
-      model: model || DEFAULT_MODEL,
+      model: resolvedModel,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       turnCount: 0,
