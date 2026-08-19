@@ -25,6 +25,11 @@ export interface SlackTrigger extends ChannelTrigger {
   // When true, the poller adds no 👀 marker to the alert message and dedups
   // from its local ledger instead. See slack-poller.ts.
   noReaction?: boolean
+  // Discord channel that mirrors this Slack channel. When set, the alert is
+  // copied there and the agent's findings are posted as an inline reply to the
+  // copy, so the conversation lives in Discord and nothing is written back to
+  // the shared Slack channel. See src/lib/webhooks/discord-mirror.ts.
+  discordChannelId?: string
 }
 
 export interface CronTrigger {
