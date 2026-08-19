@@ -4,6 +4,7 @@ import {
   chunkDiscordContent,
   formatAlertMirror,
   formatInvestigationReply,
+  postDiscordChunked,
 } from '../../../src/lib/webhooks/discord-mirror'
 
 describe('chunkDiscordContent', () => {
@@ -100,5 +101,44 @@ describe('formatInvestigationReply', () => {
     expect(out).toContain('Agent session failed')
     expect(out).toContain('exited after 0 turns')
     expect(out).toContain('claude --resume abcdef12')
+  })
+})
+
+describe('postDiscordChunked', () => {
+  const longReport = Array.from({ length: 500 }, (_, i) => `finding line ${i}`).join('\n')
+
+  function recordingPoster(ids: string[]) {
+    const calls: Array<{ content: string; replyTo?: string }> = []
+    let n = 0
+    const poster = async (_t: string, _c: string, content: string, replyTo?: string) => {
+      calls.push({ content, replyTo })
+      return ids[n++] ?? null
+    }
+    return { poster, calls }
+  }
+
+  it('chains each continuation onto the message before it', async () => {
+    const { poster, calls } = recordingPoster(['m1', 'm2', 'm3', 'm4', 'm5'])
+    const first = await postDiscordChunked('tok', 'chan', longReport, 'alert-msg', poster)
+
+    expect(calls.length).toBeGreaterThan(1)
+    expect(first).toBe('m1')
+    expect(calls[0].replyTo).toBe('alert-msg')
+    for (let i = 1; i < calls.length; i++) {
+      expect(calls[i].replyTo).toBe(`m${i}`)
+    }
+  })
+
+  it('reports failure when the first message cannot be posted', async () => {
+    const { poster, calls } = recordingPoster([])
+    expect(await postDiscordChunked('tok', 'chan', longReport, undefined, poster)).toBeNull()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('keeps the chain on the last delivered message when one chunk is dropped', async () => {
+    const { poster, calls } = recordingPoster(['m1', null as unknown as string, 'm3', 'm4', 'm5'])
+    await postDiscordChunked('tok', 'chan', longReport, 'alert-msg', poster)
+    expect(calls[1].replyTo).toBe('m1')
+    expect(calls[2].replyTo).toBe('m1')
   })
 })

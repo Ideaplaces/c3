@@ -163,33 +163,43 @@ export async function postDiscordMessage(
   }
 }
 
+/** The seam that lets the chunk sequencing be tested without touching Discord. */
+export type MessagePoster = (
+  botToken: string,
+  channelId: string,
+  content: string,
+  replyToMessageId?: string,
+) => Promise<string | null>
+
 /**
- * Post content across as many messages as Discord's limit requires.
- * Returns the ID of the FIRST message, which is what replies should reference.
- * Returns null if the first message could not be posted at all.
+ * Post content across as many messages as Discord's limit requires, chaining
+ * each one as a reply to the message before it. Without the chain the second
+ * and later parts of a long report float free in the channel, detached from
+ * the alert they answer.
+ *
+ * Returns the ID of the FIRST message, or null if that first message could not
+ * be posted at all, so the caller can fall back instead of assuming delivery.
  */
 export async function postDiscordChunked(
   botToken: string,
   channelId: string,
   content: string,
   replyToMessageId?: string,
+  poster: MessagePoster = postDiscordMessage,
 ): Promise<string | null> {
   const chunks = chunkDiscordContent(content)
   if (chunks.length === 0) return null
 
   let firstId: string | null = null
+  let previousId = replyToMessageId
   for (let i = 0; i < chunks.length; i++) {
-    // Only the first message carries the reply pointer; the rest follow it.
-    const id = await postDiscordMessage(
-      botToken,
-      channelId,
-      chunks[i],
-      i === 0 ? replyToMessageId : undefined,
-    )
+    const id = await poster(botToken, channelId, chunks[i], previousId)
     if (i === 0) {
       if (!id) return null
       firstId = id
     }
+    // A dropped continuation chunk must not re-point the chain at the alert.
+    if (id) previousId = id
   }
   return firstId
 }
