@@ -5,6 +5,7 @@ import {
   formatAlertMirror,
   formatInvestigationReply,
   postDiscordChunked,
+  slackMarkdownToDiscord,
 } from '../../../src/lib/webhooks/discord-mirror'
 
 describe('chunkDiscordContent', () => {
@@ -78,6 +79,16 @@ describe('formatAlertMirror', () => {
   it('omits the permalink line when there is none', () => {
     expect(formatAlertMirror(base)).not.toContain('slack.com')
   })
+
+  it('promises no investigation on a mirror-only channel', () => {
+    const { sessionId, sessionUrl, ...mirrorOnly } = base
+    const out = formatAlertMirror(mirrorOnly)
+    expect(out).toContain('#alerts-backend-production')
+    expect(out).toContain('500 on DELETE /users/current, 12 events')
+    expect(out).not.toContain('Investigating')
+    expect(out).not.toContain(sessionUrl)
+    expect(out).not.toContain(sessionId.slice(0, 8))
+  })
 })
 
 describe('formatInvestigationReply', () => {
@@ -140,5 +151,75 @@ describe('postDiscordChunked', () => {
     await postDiscordChunked('tok', 'chan', longReport, 'alert-msg', poster)
     expect(calls[1].replyTo).toBe('m1')
     expect(calls[2].replyTo).toBe('m1')
+  })
+})
+
+describe('slackMarkdownToDiscord', () => {
+  it('converts Slack bold to Discord bold', () => {
+    expect(slackMarkdownToDiscord('*What is failing:*')).toBe('**What is failing:**')
+  })
+
+  it('leaves an asterisk that is not emphasis alone', () => {
+    expect(slackMarkdownToDiscord('rate is 3 * 4 per run')).toBe('rate is 3 * 4 per run')
+    expect(slackMarkdownToDiscord('service api-service-* is down')).toBe(
+      'service api-service-* is down',
+    )
+  })
+
+  it('does not double up text that is already Discord bold', () => {
+    expect(slackMarkdownToDiscord('**already bold**')).toBe('**already bold**')
+  })
+
+  it('converts a Slack link to Discord link syntax', () => {
+    expect(slackMarkdownToDiscord('see <https://sentry.io/issues/1|issue 1> now')).toBe(
+      'see [issue 1](https://sentry.io/issues/1) now',
+    )
+  })
+
+  it('leaves a bare angle-bracket URL alone so Discord still suppresses the embed', () => {
+    expect(slackMarkdownToDiscord('<https://sentry.io/issues/1>')).toBe(
+      '<https://sentry.io/issues/1>',
+    )
+  })
+
+  it('converts Slack strikethrough', () => {
+    expect(slackMarkdownToDiscord('~was 500~')).toBe('~~was 500~~')
+  })
+
+  it('never rewrites the inside of a code span, which quotes evidence verbatim', () => {
+    const input = 'saw `"culprit": "tryCallTwo(*)"` in *the logs*'
+    expect(slackMarkdownToDiscord(input)).toBe('saw `"culprit": "tryCallTwo(*)"` in **the logs**')
+  })
+
+  it('leaves a fenced block untouched', () => {
+    const input = '*head*\n```\nconst x = a * b\n```\n*tail*'
+    expect(slackMarkdownToDiscord(input)).toBe('**head**\n```\nconst x = a * b\n```\n**tail**')
+  })
+
+  it('drops the empty-attachment placeholder', () => {
+    expect(slackMarkdownToDiscord('real content\n[no preview available]\n[no preview available]'))
+      .toBe('real content')
+  })
+
+  it('collapses a title the bot repeated in text and in its header block', () => {
+    expect(slackMarkdownToDiscord('AI Summary: Errors\nAI Summary: Errors\nbody')).toBe(
+      'AI Summary: Errors\nbody',
+    )
+  })
+
+  it('collapses a repeated title when one copy carries an emoji prefix', () => {
+    expect(
+      slackMarkdownToDiscord('AI Summary: Errors\n:mag: AI Summary: Errors\nbody'),
+    ).toBe('AI Summary: Errors\nbody')
+  })
+
+  it('keeps two adjacent lines that differ by more than decoration', () => {
+    expect(slackMarkdownToDiscord('Errors - staging\nErrors - production')).toBe(
+      'Errors - staging\nErrors - production',
+    )
+  })
+
+  it('keeps two identical lines that are not adjacent', () => {
+    expect(slackMarkdownToDiscord('same\nother\nsame')).toBe('same\nother\nsame')
   })
 })

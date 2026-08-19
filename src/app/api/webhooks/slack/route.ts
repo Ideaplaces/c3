@@ -40,6 +40,50 @@ export async function POST(request: Request) {
 
   console.log(`[Slack Webhook] Trigger "${trigger.name}" fired in #${channelName}`)
 
+  const slackBotToken = resolveSlackToken(trigger.slackBotToken)
+  const discordBotToken = process.env.DISCORD_BOT_TOKEN
+  const discordChannelId = trigger.discordChannelId
+  const mirrorToDiscord = Boolean(discordChannelId && discordBotToken)
+
+  const slackPermalink =
+    mirrorToDiscord && slackBotToken && messageTs
+      ? await getSlackPermalink(slackBotToken, channelId, messageTs)
+      : undefined
+
+  // Mirror-only channels carry status, not errors: build results, budget
+  // thresholds, weekly reports. Copy the message to Discord so it is visible
+  // there with everything else, and start no session.
+  if (trigger.mirrorOnly) {
+    if (!mirrorToDiscord) {
+      console.error(
+        `[Slack Webhook] Trigger "${trigger.name}" is mirrorOnly but has no reachable` +
+        ` Discord channel (discordChannelId=${discordChannelId ?? 'unset'},` +
+        ` DISCORD_BOT_TOKEN=${discordBotToken ? 'set' : 'unset'})`,
+      )
+      return Response.json({ error: 'mirrorOnly trigger has no Discord channel' }, { status: 500 })
+    }
+    const id = await postDiscordChunked(
+      discordBotToken as string,
+      discordChannelId as string,
+      formatAlertMirror({
+        channelName: channelName || trigger.name,
+        author: author || 'unknown',
+        message,
+        permalink: slackPermalink,
+      }),
+    )
+    if (!id) {
+      // No session and no Discord post means the message is nowhere. Fail loudly
+      // so the poller leaves it unmarked and the error is visible in the log.
+      console.error(`[Slack Webhook] Mirror-only post failed for ${trigger.name}`)
+      return Response.json({ error: 'Discord mirror failed' }, { status: 502 })
+    }
+    console.log(
+      `[Slack Webhook] Mirrored ${trigger.name} to Discord ${discordChannelId} (${id}), no session`,
+    )
+    return Response.json({ mirrored: true, trigger: trigger.name, status: 'mirrored' })
+  }
+
   // Generate the session ID up front so we can interpolate it into the prompt.
   // Agents that need to self-link (e.g. in a DM) can use {{sessionId}},
   // {{sessionUrl}}, and {{resumeCommand}} in their template.
@@ -60,7 +104,6 @@ export async function POST(request: Request) {
     resumeCommand,
   })
 
-  const slackBotToken = resolveSlackToken(trigger.slackBotToken)
   const replyInThread = trigger.replyInThread !== false
   const destination = resolveNotificationDestination({
     replyInThread,
@@ -71,16 +114,8 @@ export async function POST(request: Request) {
   // copied there before the session starts (so the channel shows the alert and
   // "investigating" immediately) and the findings come back as an inline reply
   // to that copy. Nothing is written to the shared Slack channel at all.
-  const discordBotToken = process.env.DISCORD_BOT_TOKEN
-  const discordChannelId = trigger.discordChannelId
-  const mirrorToDiscord = Boolean(discordChannelId && discordBotToken)
-
   let mirrorMessageId: string | null = null
   if (mirrorToDiscord) {
-    const permalink =
-      slackBotToken && messageTs
-        ? await getSlackPermalink(slackBotToken, channelId, messageTs)
-        : undefined
     mirrorMessageId = await postDiscordChunked(
       discordBotToken as string,
       discordChannelId as string,
@@ -90,7 +125,7 @@ export async function POST(request: Request) {
         message,
         sessionId,
         sessionUrl,
-        permalink,
+        permalink: slackPermalink,
       }),
     )
     if (mirrorMessageId) {

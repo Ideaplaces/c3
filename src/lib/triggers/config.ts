@@ -25,6 +25,12 @@ export interface SlackTrigger extends ChannelTrigger {
   // When true, the poller adds no 👀 marker to the alert message and dedups
   // from its local ledger instead. See slack-poller.ts.
   noReaction?: boolean
+  // When true, the message is copied to the Discord mirror and nothing else
+  // happens: no session, no investigation. For channels that carry status
+  // rather than errors (build results, budget thresholds, weekly reports),
+  // where an investigation per message would be pure cost. Requires
+  // discordChannelId. See src/app/api/webhooks/slack/route.ts.
+  mirrorOnly?: boolean
   // Discord channel that mirrors this Slack channel. When set, the alert is
   // copied there and the agent's findings are posted as an inline reply to the
   // copy, so the conversation lives in Discord and nothing is written back to

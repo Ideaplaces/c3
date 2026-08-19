@@ -76,21 +76,88 @@ function hardSplit(line: string, size: number): string[] {
   return out
 }
 
+/**
+ * Rewrite Slack mrkdwn as Discord markdown.
+ *
+ * The two dialects overlap enough to look interchangeable and are not. Slack
+ * bold is `*one asterisk*`, which Discord renders as literal asterisks, and
+ * Slack links are `<url|label>`, which Discord renders raw. A mirrored alert
+ * full of stray asterisks is the difference between a channel you read and one
+ * you skim past.
+ *
+ * Code spans are left exactly as they are: an alert quotes log lines verbatim,
+ * and "fixing" the punctuation inside one would misreport the evidence.
+ */
+export function slackMarkdownToDiscord(text: string): string {
+  const converted = mapOutsideCodeSpans(text, segment =>
+    segment
+      // <url|label> and <url>. Do links before emphasis so a label containing
+      // an asterisk is not mangled mid-rewrite.
+      .replace(/<(https?:\/\/[^|>\s]+)\|([^>]+)>/g, '[$2]($1)')
+      // *bold* -> **bold**, only when the asterisks hug the text and stand
+      // alone, so multiplication and glob patterns survive.
+      .replace(/(?<![*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![*\w])/g, '**$1**')
+      // ~strike~ -> ~~strike~~
+      .replace(/(?<![~\w])~(?!\s)([^~\n]+?)(?<!\s)~(?![~\w])/g, '~~$1~~'),
+  )
+
+  return dropSlackArtifacts(converted)
+}
+
+/** Apply a transform to everything except fenced blocks and inline code. */
+function mapOutsideCodeSpans(text: string, fn: (segment: string) => string): string {
+  const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+  return parts.map((part, i) => (i % 2 === 1 ? part : fn(part))).join('')
+}
+
+/**
+ * Strip the residue of reading a Slack message through the API: attachments
+ * with no text render as "[no preview available]", and a bot that sets both
+ * `text` and a header block repeats its own title on the next line.
+ */
+function dropSlackArtifacts(text: string): string {
+  // The repeated title is usually not character-identical: the bot puts the
+  // plain string in `text` and an emoji-prefixed copy in its header block.
+  const withoutDecoration = (line: string) => line.trim().replace(/^(?::[a-z0-9_+-]+:\s*)+/i, '')
+
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    if (line.trim() === '[no preview available]') continue
+    const previous = out[out.length - 1]
+    if (
+      previous !== undefined &&
+      line.trim() &&
+      withoutDecoration(line) === withoutDecoration(previous)
+    ) {
+      continue
+    }
+    out.push(line)
+  }
+  return out.join('\n').trim()
+}
+
 export interface MirrorHeaderOptions {
   channelName: string
   author: string
   message: string
-  sessionId: string
-  sessionUrl: string
   permalink?: string
+  /** Omitted on a mirror-only channel, where no session runs. */
+  sessionId?: string
+  sessionUrl?: string
 }
 
-/** The copy of the Slack alert that lands in Discord, with a live session link. */
+/**
+ * The copy of the Slack alert that lands in Discord. It carries a live session
+ * link when an investigation is starting, and nothing when the channel is
+ * mirror-only, so the message never promises an answer that is not coming.
+ */
 export function formatAlertMirror(opts: MirrorHeaderOptions): string {
   const lines = [`**#${opts.channelName}** · ${opts.author}`]
   if (opts.permalink) lines.push(`<${opts.permalink}>`)
-  lines.push('', opts.message.trim(), '')
-  lines.push(`_Investigating…_ \`${opts.sessionId.slice(0, 8)}\` · <${opts.sessionUrl}>`)
+  lines.push('', slackMarkdownToDiscord(opts.message))
+  if (opts.sessionId && opts.sessionUrl) {
+    lines.push('', `_Investigating…_ \`${opts.sessionId.slice(0, 8)}\` · <${opts.sessionUrl}>`)
+  }
   return lines.join('\n')
 }
 

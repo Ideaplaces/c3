@@ -248,9 +248,11 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     const fullMessage = extractFullText(msg)
     console.log(`[Slack Poller] Processing message from ${author} (${fullMessage.length} chars): ${fullMessage.slice(0, 100)}...`)
 
-    // Forward to C3 webhook. :eyes: is only added AFTER a confirmed session is
-    // created, so a dead/500-responding c3 cannot silently swallow a message.
-    let sessionId: string | undefined
+    // Forward to C3 webhook. :eyes: is only added AFTER c3 confirms it handled
+    // the message, so a dead/500-responding c3 cannot silently swallow one.
+    // "Handled" is a started session, or, for a mirror-only channel, a message
+    // successfully copied into Discord.
+    let handled: string | undefined
     let failureReason: string | undefined
 
     try {
@@ -272,21 +274,27 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       if (!webhookRes.ok) {
         failureReason = `HTTP ${webhookRes.status} ${webhookRes.statusText}`
       } else {
-        const result = await webhookRes.json() as { sessionId?: string; error?: string }
+        const result = await webhookRes.json() as {
+          sessionId?: string
+          mirrored?: boolean
+          error?: string
+        }
         if (result.sessionId) {
-          sessionId = result.sessionId
+          handled = `session ${result.sessionId}`
+        } else if (result.mirrored) {
+          handled = 'mirrored to Discord'
         } else {
-          failureReason = `no sessionId (error: ${result.error || 'unknown'})`
+          failureReason = `c3 neither started a session nor mirrored (error: ${result.error || 'unknown'})`
         }
       }
     } catch (err) {
       failureReason = err instanceof Error ? err.message : String(err)
     }
 
-    if (sessionId) {
-      console.log(`[Slack Poller] Session started: ${sessionId}`)
+    if (handled) {
+      console.log(`[Slack Poller] Handled: ${handled}`)
       lastSessionTime.set(trigger.channelId, Date.now())
-      // Only mark the Slack message as processed after c3 confirms a session.
+      // Only mark the Slack message as processed after c3 confirms it handled it.
       if (useReaction) {
         await markAsProcessed(token, trigger.channelId, msg.ts)
       } else {
