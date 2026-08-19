@@ -28,7 +28,10 @@
       "projectPath": "~/my-project",
       "permissionMode": "bypassPermissions",
       "model": "claude-opus-4-6",
-      "pollIntervalMs": 15000
+      "pollIntervalMs": 15000,
+      "replyInThread": false,
+      "noReaction": true,
+      "discordChannelId": "YOUR_DISCORD_CHANNEL_ID"
     }
   }
 }

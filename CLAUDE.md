@@ -62,6 +62,22 @@ cp prompts/*.md ~/.c3/prompts/
 # Edit ~/.c3/triggers.json with your channel IDs and project paths
 ```
 
+### Answering a Slack alert in Discord instead of Slack
+
+A Slack trigger can carry `discordChannelId`. When it does, C3 copies the alert
+into that Discord channel before the session starts and posts the agent's report
+as an inline reply to the copy. Nothing is written back to Slack: no thread
+reply, no session-start notice, no reaction. A Slack DM to `notifyUserId` stays
+as the degraded fallback for when Discord refuses the post, so a report is never
+silently lost.
+
+Use it for alert channels shared with a team, where a bot reply reads as
+"someone is handling this" and a DM loses the per-channel grouping. Give each
+watched Slack channel its own Discord twin so the alert and its answer stay
+together. The agent's prompt must then treat its final message as the
+deliverable and never post anywhere itself. See
+`src/lib/webhooks/discord-mirror.ts`.
+
 ## Auth
 
 Three options (configured via .env.local):
