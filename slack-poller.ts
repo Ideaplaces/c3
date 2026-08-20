@@ -328,7 +328,9 @@ async function main() {
   }
 
   console.log(`[Slack Poller] Watching ${slackTriggers.length} channel(s):`)
-  slackTriggers.forEach(t => console.log(`  - #${t.name} (${t.channelId})`))
+  slackTriggers.forEach(t =>
+    console.log(`  - #${t.name} (${t.channelId}) every ${(t.pollIntervalMs || 15000) / 1000}s`),
+  )
 
   const state = loadState()
 
@@ -341,25 +343,30 @@ async function main() {
     }
   }
 
-  // Poll loop
-  const pollInterval = slackTriggers[0].pollIntervalMs || 15000
-  console.log(`[Slack Poller] Polling every ${pollInterval / 1000}s`)
+  // Poll loop: each channel runs on its own pollIntervalMs timer, with
+  // staggered start times so channels sharing a workspace token don't hit
+  // the Slack API in one burst (that pattern got us ratelimited).
+  const inFlight = new Set<string>()
 
-  const poll = async () => {
-    for (const trigger of slackTriggers) {
-      try {
-        await pollChannel(trigger, state)
-      } catch (err) {
-        console.error(`[Slack Poller] Error polling ${trigger.name}:`, err)
-      }
+  const pollOne = async (trigger: SlackTrigger) => {
+    if (inFlight.has(trigger.channelId)) return
+    inFlight.add(trigger.channelId)
+    try {
+      await pollChannel(trigger, state)
+    } catch (err) {
+      console.error(`[Slack Poller] Error polling ${trigger.name}:`, err)
+    } finally {
+      inFlight.delete(trigger.channelId)
     }
   }
 
-  // Initial poll
-  await poll()
-
-  // Continue polling
-  setInterval(poll, pollInterval)
+  slackTriggers.forEach((trigger, i) => {
+    const intervalMs = trigger.pollIntervalMs || 15000
+    setTimeout(() => {
+      void pollOne(trigger)
+      setInterval(() => void pollOne(trigger), intervalMs)
+    }, i * 2000)
+  })
 }
 
 main().catch(err => {
