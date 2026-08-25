@@ -12,6 +12,7 @@ import {
 import {
   formatAlertMirror,
   formatInvestigationReply,
+  formatReportPostedLog,
   postDiscordChunked,
 } from '@/lib/webhooks/discord-mirror'
 
@@ -216,8 +217,11 @@ export async function POST(request: Request) {
         )
         if (posted) {
           console.log(
-            `[Slack Webhook] Posted report to Discord ${discordChannelId} for ${sessionId}` +
-            ` (failed=${failure.failed})`,
+            formatReportPostedLog({
+              channelId: discordChannelId as string,
+              sessionId,
+              failed: failure.failed,
+            }),
           )
           return
         }

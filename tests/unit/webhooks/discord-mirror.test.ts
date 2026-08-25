@@ -4,6 +4,7 @@ import {
   chunkDiscordContent,
   formatAlertMirror,
   formatInvestigationReply,
+  formatReportPostedLog,
   postDiscordChunked,
   slackMarkdownToDiscord,
 } from '../../../src/lib/webhooks/discord-mirror'
@@ -112,6 +113,42 @@ describe('formatInvestigationReply', () => {
     expect(out).toContain('Agent session failed')
     expect(out).toContain('exited after 0 turns')
     expect(out).toContain('claude --resume abcdef12')
+  })
+})
+
+describe('formatReportPostedLog', () => {
+  // Verbatim from the c3 log shipper, which mirrors the regex the Azure alert
+  // summarizer scans plain log lines with. Anything a success path prints that
+  // matches this becomes a false #alerts-production error.
+  const ERROR_REGEX = /\b(error|exception|failed|fatal|unhandled|uncaught)\b/i
+
+  const base = {
+    channelId: '1539471007503622264',
+    sessionId: '03d22e2d-1bc0-4e3d-9663-10c883cba90e',
+  }
+
+  it('does not read as an error when the investigated session failed', () => {
+    const line = formatReportPostedLog({ ...base, failed: true })
+    expect(line).not.toMatch(ERROR_REGEX)
+    expect(line).toContain('outcome=failure')
+  })
+
+  it('does not read as an error when the investigated session succeeded', () => {
+    const line = formatReportPostedLog({ ...base, failed: false })
+    expect(line).not.toMatch(ERROR_REGEX)
+    expect(line).toContain('outcome=success')
+  })
+
+  it('names the channel and the session so a delivered report is traceable', () => {
+    const line = formatReportPostedLog({ ...base, failed: true })
+    expect(line).toContain('1539471007503622264')
+    expect(line).toContain('03d22e2d-1bc0-4e3d-9663-10c883cba90e')
+  })
+
+  it('distinguishes the two outcomes', () => {
+    expect(formatReportPostedLog({ ...base, failed: true })).not.toBe(
+      formatReportPostedLog({ ...base, failed: false }),
+    )
   })
 })
 

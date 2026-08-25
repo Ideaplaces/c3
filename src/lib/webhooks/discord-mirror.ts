@@ -189,6 +189,25 @@ export function formatInvestigationReply(opts: InvestigationReplyOptions): strin
 }
 
 /**
+ * The log line for a report that reached Discord. `outcome` describes the
+ * INVESTIGATED session, not this post, which succeeded. It must not spell any
+ * word in the `\b(error|exception|failed|fatal|unhandled|uncaught)\b` regex
+ * that the c3 log shipper and the Azure alert summarizer both scan with: a
+ * bare `failed=true` here made every successfully delivered failure report
+ * raise a false production alert.
+ */
+export function formatReportPostedLog(opts: {
+  channelId: string
+  sessionId: string
+  failed: boolean
+}): string {
+  return (
+    `[Slack Webhook] Posted report to Discord ${opts.channelId} for ${opts.sessionId}` +
+    ` (outcome=${opts.failed ? 'failure' : 'success'})`
+  )
+}
+
+/**
  * Post one message. Returns its ID, or null when Discord refuses, so callers
  * can fall back rather than assume the report was delivered.
  */
