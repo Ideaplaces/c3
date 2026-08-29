@@ -109,3 +109,27 @@ export async function recordSessionUsage(
     console.error('[Usage] could not record session usage:', err)
   }
 }
+
+/** A precheck said there was nothing to do: one zero-token line, so the rollup shows the quiet days too. */
+export function recordSkippedRun(label: string, projectPath: string, reason: string): void {
+  try {
+    appendUsage(usageLedgerPath(), {
+      ts: new Date().toISOString(),
+      sessionId: `skipped-${Date.now()}`,
+      label,
+      projectPath,
+      model: '',
+      status: `skipped: ${reason}`.slice(0, 200),
+      turns: 0,
+      durationMs: 0,
+      inputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: 0,
+      contextTokens: 0,
+      costUsd: 0,
+    })
+  } catch (err) {
+    console.error('[Usage] could not record skipped run:', err)
+  }
+}
