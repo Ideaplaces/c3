@@ -8,7 +8,7 @@ import { getSessionJSONLPath, getSessionLastActivityMs } from '@/lib/claude-sess
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
 import { DEFAULT_MODEL } from '@/lib/models'
-import { recordSessionUsage } from '@/lib/usage'
+import { recordSessionUsage, startUsageTracking, trackAssistantUsage } from '@/lib/usage'
 
 interface ActiveSession {
   id: string
@@ -208,6 +208,7 @@ export class SessionManager extends EventEmitter {
       model: resolvedModel,
     })
     this.sessionStartTime.set(sessionId, Date.now())
+    startUsageTracking(sessionId, label)
 
     // Fire-and-forget, but catch rejections so a single bad session cannot
     // silently break session_ended emission for every subsequent session.
@@ -364,6 +365,10 @@ export class SessionManager extends EventEmitter {
         }
         // SDK automatically persists to ~/.claude/projects/ JSONL
         this.emit('sdk_event', sessionId, message)
+        if (message.type === 'assistant') {
+          // Live usage: alert while the run is still stoppable, not after.
+          void trackAssistantUsage(sessionId, (message as { message?: { usage?: Parameters<typeof trackAssistantUsage>[1] } }).message?.usage)
+        }
         this.handleMessageMetadata(sessionId, message)
       }
 

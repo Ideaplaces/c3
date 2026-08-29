@@ -207,3 +207,92 @@ export function formatSummary(rows: LabelSummary[], days: number, now: Date): st
   lines.push('```')
   return lines.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// Live tracking: the alert Chip can act on fires while the session is still
+// running, not in the post-mortem. Every assistant turn carries a usage block;
+// the running context total is compared against the trigger's own baseline
+// and an alert goes out the moment it crosses, then again at every doubling
+// so a runaway keeps announcing itself without spamming.
+// ---------------------------------------------------------------------------
+
+export interface RunningUsage {
+  turns: number
+  contextTokens: number
+  outputTokens: number
+  /** Context totals at which an alert has already been sent. */
+  alertedAt: number[]
+}
+
+export interface Baseline {
+  medianContext: number
+  sample: number
+}
+
+export function newRunning(): RunningUsage {
+  return { turns: 0, contextTokens: 0, outputTokens: 0, alertedAt: [] }
+}
+
+export function baselineFor(label: string, history: UsageRecord[], window = 20): Baseline {
+  const prior = history.filter((r) => r.label === label).slice(-window)
+  return { medianContext: median(prior.map((r) => r.contextTokens)), sample: prior.length }
+}
+
+export function addTurn(
+  state: RunningUsage,
+  usage: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number } | undefined,
+): RunningUsage {
+  if (!usage) return state
+  return {
+    ...state,
+    turns: state.turns + 1,
+    contextTokens:
+      state.contextTokens + (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0),
+    outputTokens: state.outputTokens + (usage.output_tokens || 0),
+  }
+}
+
+/**
+ * The line a running session must not cross quietly. With a baseline (three
+ * or more prior runs of the same trigger) it is twice the median, never below
+ * `floor`; without one it is `absolute`, the ceiling any single run should
+ * justify to a human.
+ */
+export function alertThreshold(
+  baseline: Baseline,
+  opts: { factor?: number; floor?: number; absolute?: number; minSample?: number } = {},
+): number {
+  const { factor = 2, floor = 300_000, absolute = 3_000_000, minSample = 3 } = opts
+  if (baseline.sample < minSample) return absolute
+  return Math.max(floor, factor * baseline.medianContext)
+}
+
+/** Alert on the first crossing of the threshold, then at every doubling of the last alerted total. */
+export function shouldAlert(state: RunningUsage, threshold: number): boolean {
+  if (state.contextTokens < threshold) return false
+  const last = state.alertedAt[state.alertedAt.length - 1]
+  return last === undefined || state.contextTokens >= 2 * last
+}
+
+export function formatRunningAlert(
+  label: string,
+  state: RunningUsage,
+  baseline: Baseline,
+  threshold: number,
+  sessionUrl: string,
+): string {
+  const vs = baseline.sample >= 3 ? `${(state.contextTokens / baseline.medianContext).toFixed(1)}x its median of ${fmtTokens(baseline.medianContext)}` : `above the ${fmtTokens(threshold)} ceiling, no baseline yet`
+  // alertedAt already holds this alert's total, so its length is this alert's ordinal.
+  const again = state.alertedAt.length > 1 ? ` (alert ${state.alertedAt.length}, still running)` : ' and still running'
+  return (
+    `**C3 usage alert** \`${label}\`: ${fmtTokens(state.contextTokens)} context tokens over ${state.turns} turns${again}, ${vs}. ` +
+    `Stop it from ${sessionUrl}`
+  )
+}
+
+export function formatRunningClose(label: string, record: UsageRecord, alerts: number): string {
+  return (
+    `**C3 usage alert closed** \`${label}\`: finished at ${fmtTokens(record.contextTokens)} context tokens, ` +
+    `${record.turns} turns, $${record.costUsd.toFixed(2)} est., ${Math.round(record.durationMs / 60000)} min, ${alerts} alert(s).`
+  )
+}
