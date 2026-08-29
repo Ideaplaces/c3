@@ -109,3 +109,50 @@ describe('summary', () => {
     expect(line).toContain('6 min')
   })
 })
+
+describe('live tracking', () => {
+  const turn = (ctx: number) => ({ input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: ctx - 10, output_tokens: 100 })
+
+  it('accumulates context and turns from each assistant usage block', async () => {
+    const { addTurn, newRunning } = await import('@/lib/usage/ledger')
+    let s = newRunning()
+    s = addTurn(s, turn(120_000))
+    s = addTurn(s, turn(130_000))
+    s = addTurn(s, undefined)
+    expect(s.turns).toBe(2)
+    expect(s.contextTokens).toBe(250_000)
+    expect(s.outputTokens).toBe(200)
+  })
+
+  it('uses twice the median with a baseline, the absolute ceiling without one', async () => {
+    const { alertThreshold } = await import('@/lib/usage/ledger')
+    expect(alertThreshold({ medianContext: 400_000, sample: 5 })).toBe(800_000)
+    expect(alertThreshold({ medianContext: 20_000, sample: 5 })).toBe(300_000)
+    expect(alertThreshold({ medianContext: 400_000, sample: 2 })).toBe(3_000_000)
+  })
+
+  it('alerts on the first crossing, then only at each doubling', async () => {
+    const { addTurn, newRunning, shouldAlert } = await import('@/lib/usage/ledger')
+    let s = newRunning()
+    const fired: number[] = []
+    for (let i = 0; i < 40; i++) {
+      s = addTurn(s, turn(100_000))
+      if (shouldAlert(s, 800_000)) {
+        s.alertedAt.push(s.contextTokens)
+        fired.push(s.contextTokens)
+      }
+    }
+    expect(fired).toEqual([800_000, 1_600_000, 3_200_000])
+  })
+
+  it('the alert names the trigger, the size and where to stop it', async () => {
+    const { formatRunningAlert, newRunning } = await import('@/lib/usage/ledger')
+    const s = { ...newRunning(), turns: 44, contextTokens: 4_900_000 }
+    const line = formatRunningAlert('cron:daily-ops-brief', s, { medianContext: 425_000, sample: 4 }, 850_000, 'https://c3/sessions/abc')
+    expect(line).toContain('cron:daily-ops-brief')
+    expect(line).toContain('4.9M')
+    expect(line).toContain('11.5x')
+    expect(line).toContain('still running')
+    expect(line).toContain('https://c3/sessions/abc')
+  })
+})
