@@ -3,6 +3,14 @@ import path from 'path'
 
 export interface ChannelTrigger {
   name: string
+  /**
+   * Shell command run in projectPath before the session starts, with the
+   * triggering message in C3_MESSAGE, C3_CHANNEL_ID, C3_MESSAGE_TS (Slack ts
+   * or Discord message id) and C3_AUTHOR. Exit 0 starts the session; any other
+   * exit skips it at zero tokens. Lets an alert channel drop a signature that
+   * was already investigated this week instead of paying for it again.
+   */
+  precheck?: string
   channelId: string
   prompt: string
   projectPath: string

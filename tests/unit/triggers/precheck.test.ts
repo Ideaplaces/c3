@@ -26,3 +26,11 @@ describe('runPrecheck', () => {
     expect(r.reason).toBe(process.env.HOME)
   })
 })
+
+describe('runPrecheck env', () => {
+  it('hands the triggering message to the command through the environment', async () => {
+    const r = await runPrecheck('echo "got: $C3_MESSAGE / $C3_CHANNEL_ID"', '/tmp', { C3_MESSAGE: 'disk full on api', C3_CHANNEL_ID: 'C123' })
+    expect(r.proceed).toBe(true)
+    expect(r.reason).toBe('got: disk full on api / C123')
+  })
+})

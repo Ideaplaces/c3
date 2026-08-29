@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import { runPrecheck } from '@/lib/triggers/precheck'
+import { recordSkippedRun } from '@/lib/usage'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getSlackTrigger, loadPromptTemplate } from '@/lib/triggers/config'
@@ -137,6 +139,20 @@ export async function POST(request: Request) {
         `[Slack Webhook] Discord mirror failed for ${trigger.name};` +
         ` the report will be posted unthreaded or fall back to Slack DM`,
       )
+    }
+  }
+
+  if (trigger.precheck) {
+    const check = await runPrecheck(trigger.precheck, trigger.projectPath, {
+      C3_MESSAGE: String(message ?? ''),
+      C3_CHANNEL_ID: String(channelId ?? ''),
+      C3_MESSAGE_TS: String(messageTs || ''),
+      C3_AUTHOR: String(author ?? ''),
+    })
+    if (!check.proceed) {
+      console.log(`[Slack Webhook] Precheck skipped "${trigger.name}" (exit ${check.exitCode}): ${check.reason}`)
+      recordSkippedRun(`slack:${trigger.name}`, trigger.projectPath, check.reason)
+      return Response.json({ trigger: trigger.name, status: 'skipped', reason: check.reason })
     }
   }
 
