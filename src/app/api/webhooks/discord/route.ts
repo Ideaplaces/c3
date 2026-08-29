@@ -43,6 +43,7 @@ export async function POST(request: Request) {
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
     model: trigger.model || DEFAULT_MODEL,
+    label: `discord:${trigger.name}`,
   })
 
   console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)

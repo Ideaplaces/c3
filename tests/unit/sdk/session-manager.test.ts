@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock fs for session store
 const mockFs: Record<string, string> = {}
 vi.mock('fs', () => ({
+  appendFileSync: vi.fn(),
   readFileSync: vi.fn((path: string) => {
     if (mockFs[path]) return mockFs[path]
     throw new Error('ENOENT')

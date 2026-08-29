@@ -4,6 +4,7 @@ const mockDirs: Record<string, string[]> = {}
 const mockExists: Set<string> = new Set()
 
 vi.mock('fs', () => ({
+  appendFileSync: vi.fn(),
   readdirSync: vi.fn((dir: string) => mockDirs[dir] || []),
   statSync: vi.fn(() => ({ isDirectory: () => true })),
   existsSync: vi.fn((path: string) => mockExists.has(path)),
