@@ -46,6 +46,13 @@ export interface CronTrigger {
   permissionMode: string
   model: string
   enabled?: boolean
+  /**
+   * Shell command run in projectPath before the session starts. Exit 0 starts
+   * the session; any other exit skips it, at zero tokens, and the command's
+   * stdout is logged as the reason. For the daily reviewers a quiet day used
+   * to cost a full session just to discover there was nothing to review.
+   */
+  precheck?: string
 }
 
 interface TriggersConfig {

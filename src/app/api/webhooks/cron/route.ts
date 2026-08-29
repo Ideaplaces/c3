@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getCronTrigger, loadPromptTemplate } from '@/lib/triggers/config'
+import { runPrecheck } from '@/lib/triggers/precheck'
+import { recordSkippedRun } from '@/lib/usage'
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('Authorization')
@@ -24,6 +26,17 @@ export async function POST(request: Request) {
   }
 
   console.log(`[Cron Webhook] Trigger "${trigger.name}" fired (schedule: ${schedule})`)
+
+  if (trigger.precheck) {
+    const check = await runPrecheck(trigger.precheck, trigger.projectPath)
+    if (!check.proceed) {
+      console.log(
+        `[Cron Webhook] Precheck skipped "${trigger.name}" (exit ${check.exitCode}): ${check.reason}`,
+      )
+      recordSkippedRun(`cron:${trigger.name}`, trigger.projectPath, check.reason)
+      return Response.json({ trigger: trigger.name, status: 'skipped', reason: check.reason })
+    }
+  }
 
   // Pre-generate the sessionId so it can be substituted into the prompt
   // template. This lets cron-triggered prompts (which post their own
