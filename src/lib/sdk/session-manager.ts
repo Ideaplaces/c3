@@ -8,12 +8,15 @@ import { getSessionJSONLPath, getSessionLastActivityMs } from '@/lib/claude-sess
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
 import { DEFAULT_MODEL } from '@/lib/models'
+import { recordSessionUsage } from '@/lib/usage'
 
 interface ActiveSession {
   id: string
   query: Query
   abortController: AbortController
   projectPath: string
+  label: string
+  model: string
 }
 
 interface StartSessionParams {
@@ -22,6 +25,8 @@ interface StartSessionParams {
   permissionMode: string
   model?: string
   sessionId?: string
+  /** Who started it, for the usage ledger: `cron:<trigger>`, `slack:<trigger>`, `discord:<trigger>`, `web`. */
+  label?: string
 }
 
 // Classic stall: the SDK generator stops emitting events for this long → abort
@@ -137,6 +142,7 @@ export class SessionManager extends EventEmitter {
 
   async startSession(params: StartSessionParams): Promise<string> {
     const { projectPath, prompt, permissionMode, model } = params
+    const label = params.label ?? 'unlabelled'
     const sessionId = params.sessionId ?? randomUUID()
     // Always pin the model explicitly. Without this the SDK falls back to the
     // CLI's own default, which drifts from what we record and show for the session.
@@ -198,6 +204,8 @@ export class SessionManager extends EventEmitter {
       query: q,
       abortController,
       projectPath,
+      label,
+      model: resolvedModel,
     })
     this.sessionStartTime.set(sessionId, Date.now())
 
@@ -269,6 +277,8 @@ export class SessionManager extends EventEmitter {
       query: q,
       abortController,
       projectPath,
+      label: 'resume',
+      model: sessionMeta?.model ?? DEFAULT_MODEL,
     })
     this.sessionStartTime.set(sessionId, Date.now())
 
@@ -377,6 +387,14 @@ export class SessionManager extends EventEmitter {
 
   private handleMessageMetadata(sessionId: string, message: SDKMessage) {
     if (message.type === 'result') {
+      const active = this.activeSessions.get(sessionId)
+      // Every finished run gets a ledger line; only an outlier reaches Discord.
+      void recordSessionUsage(message, {
+        sessionId,
+        label: active?.label ?? 'unlabelled',
+        projectPath: active?.projectPath ?? '',
+        model: active?.model ?? '',
+      })
       if (message.subtype === 'success') {
         updateSession(sessionId, {
           turnCount: message.num_turns,

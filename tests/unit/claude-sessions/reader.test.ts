@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFs: Record<string, string> = {}
 
 vi.mock('fs', () => ({
+  appendFileSync: vi.fn(),
   existsSync: vi.fn((path: string) => path in mockFs),
   readFileSync: vi.fn((path: string) => {
     if (mockFs[path]) return mockFs[path]

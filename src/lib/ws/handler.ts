@@ -39,6 +39,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
           prompt: message.prompt,
           permissionMode: message.permissionMode,
           model: message.model,
+          label: 'web',
         })
 
         // Track this session for this WebSocket

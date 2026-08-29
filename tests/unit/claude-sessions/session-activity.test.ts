@@ -4,6 +4,7 @@ const mockDirs: Record<string, string[]> = {}
 const mockStats: Record<string, { mtimeMs: number }> = {}
 
 vi.mock('fs', () => ({
+  appendFileSync: vi.fn(),
   existsSync: vi.fn((path: string) => path in mockStats || path in mockDirs),
   readdirSync: vi.fn((path: string) => {
     if (path in mockDirs) return mockDirs[path]
