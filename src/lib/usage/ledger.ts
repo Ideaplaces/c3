@@ -282,7 +282,8 @@ export function formatRunningAlert(
   sessionUrl: string,
 ): string {
   const vs = baseline.sample >= 3 ? `${(state.contextTokens / baseline.medianContext).toFixed(1)}x its median of ${fmtTokens(baseline.medianContext)}` : `above the ${fmtTokens(threshold)} ceiling, no baseline yet`
-  const again = state.alertedAt.length ? ` (alert ${state.alertedAt.length + 1}, still running)` : ' and still running'
+  // alertedAt already holds this alert's total, so its length is this alert's ordinal.
+  const again = state.alertedAt.length > 1 ? ` (alert ${state.alertedAt.length}, still running)` : ' and still running'
   return (
     `**C3 usage alert** \`${label}\`: ${fmtTokens(state.contextTokens)} context tokens over ${state.turns} turns${again}, ${vs}. ` +
     `Stop it from ${sessionUrl}`

@@ -147,12 +147,15 @@ describe('live tracking', () => {
 
   it('the alert names the trigger, the size and where to stop it', async () => {
     const { formatRunningAlert, newRunning } = await import('@/lib/usage/ledger')
-    const s = { ...newRunning(), turns: 44, contextTokens: 4_900_000 }
+    const s = { ...newRunning(), turns: 44, contextTokens: 4_900_000, alertedAt: [4_900_000] }
     const line = formatRunningAlert('cron:daily-ops-brief', s, { medianContext: 425_000, sample: 4 }, 850_000, 'https://c3/sessions/abc')
     expect(line).toContain('cron:daily-ops-brief')
     expect(line).toContain('4.9M')
     expect(line).toContain('11.5x')
-    expect(line).toContain('still running')
+    expect(line).toContain('and still running')
+    expect(line).not.toContain('alert 2')
     expect(line).toContain('https://c3/sessions/abc')
+    const second = formatRunningAlert('cron:daily-ops-brief', { ...s, contextTokens: 9_800_000, alertedAt: [4_900_000, 9_800_000] }, { medianContext: 425_000, sample: 4 }, 850_000, 'https://c3/sessions/abc')
+    expect(second).toContain('(alert 2, still running)')
   })
 })
