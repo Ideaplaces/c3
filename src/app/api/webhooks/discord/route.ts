@@ -1,4 +1,6 @@
 import { sessionManager } from '@/lib/sdk/session-manager'
+import { runPrecheck } from '@/lib/triggers/precheck'
+import { recordSkippedRun } from '@/lib/usage'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
@@ -38,6 +40,20 @@ export async function POST(request: Request) {
   })
 
   // Start Claude Code session
+  if (trigger.precheck) {
+    const check = await runPrecheck(trigger.precheck, trigger.projectPath, {
+      C3_MESSAGE: String(message ?? ''),
+      C3_CHANNEL_ID: String(trigger.channelId ?? ''),
+      C3_MESSAGE_TS: String(messageId || ''),
+      C3_AUTHOR: String(author ?? ''),
+    })
+    if (!check.proceed) {
+      console.log(`[Discord Webhook] Precheck skipped "${trigger.name}" (exit ${check.exitCode}): ${check.reason}`)
+      recordSkippedRun(`discord:${trigger.name}`, trigger.projectPath, check.reason)
+      return Response.json({ trigger: trigger.name, status: 'skipped', reason: check.reason })
+    }
+  }
+
   const sessionId = await sessionManager.startSession({
     projectPath: trigger.projectPath,
     prompt,
