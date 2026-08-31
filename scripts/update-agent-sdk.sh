@@ -36,7 +36,7 @@ fail() { log "FAILED at $1"; git checkout -q -- package.json package-lock.json 2
 ver() { python3 -c "import json;print(json.load(open('node_modules/@anthropic-ai/claude-agent-sdk/package.json'))['version'])"; }
 CUR=$(ver)
 LATEST=$(npm view @anthropic-ai/claude-agent-sdk version 2>/dev/null) || { log "npm view failed"; exit 1; }
-if [ "$CUR" = "$LATEST" ] && [ "$FORCE" = 0 ]; then exit 0; fi
+if [ "$CUR" = "$LATEST" ] && [ "$FORCE" = 0 ]; then log "up to date at $CUR"; exit 0; fi
 log "update $CUR -> $LATEST (force=$FORCE)"
 
 [ "$(git branch --show-current)" = main ] || fail "not on main ($(git branch --show-current))"
