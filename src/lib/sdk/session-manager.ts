@@ -418,5 +418,13 @@ export class SessionManager extends EventEmitter {
   }
 }
 
-// Singleton
-export const sessionManager = new SessionManager()
+// Singleton, registered on globalThis. This module is loaded twice in the c3
+// process: the tsx graph (server.ts, the ws handler) and the webpack bundle
+// (.next webhook routes) each instantiate their own copy of the module. Two
+// managers means two activeSessions maps: the browser could never see a cron,
+// Slack, or Discord session as active, its Stop button was a no-op for them,
+// and reattaching to a running webhook session fell back to guessing liveness
+// from the JSONL file. globalThis is shared by both module graphs, so both
+// resolve to the one manager that actually owns the sessions.
+const globalScope = globalThis as typeof globalThis & { __c3SessionManager?: SessionManager }
+export const sessionManager: SessionManager = (globalScope.__c3SessionManager ??= new SessionManager())
