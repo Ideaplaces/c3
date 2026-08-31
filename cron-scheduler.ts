@@ -170,7 +170,7 @@ async function checkAndFire(trigger: CronTrigger) {
       }),
     })
 
-    const result = await res.json() as { sessionId?: string; error?: string }
+    const result = await res.json() as { sessionId?: string; error?: string; status?: string; reason?: string }
     if (res.ok && result.sessionId) {
       console.log(`[Cron Scheduler] Session started: ${result.sessionId} for "${trigger.name}"`)
     } else if (res.ok && result.status === 'skipped') {
