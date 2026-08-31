@@ -36,6 +36,15 @@ describe('middleware public paths', () => {
     expect(res.headers.get('location')).toBeNull()
   })
 
+  it('allows /ws without a session cookie (the ws server runs its own JWT check)', async () => {
+    // Next 15 runs middleware on upgrade requests. A redirect here gets
+    // written into a socket the ws server has already upgraded and the
+    // client dies on a corrupt frame.
+    const { middleware } = await import('@/middleware')
+    const res = middleware(buildRequest('/ws?token=abc'))
+    expect(res.headers.get('location')).toBeNull()
+  })
+
   it('redirects /sessions to login without authentication', async () => {
     const { middleware } = await import('@/middleware')
     const res = middleware(buildRequest('/sessions'))
