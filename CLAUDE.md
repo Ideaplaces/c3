@@ -12,6 +12,10 @@ C3 config lives in git (`Ideaplaces/c3` for the tool, `Ideaplaces/c3-chip` for C
 
 Remote Claude Code sessions + autonomous agents triggered by Discord messages, Slack messages, or cron schedules.
 
+## CRITICAL: Restarting the c3 process kills every live session
+
+Every session (web, cron, Slack, Discord) runs as a claude child process of the single `c3` pm2 process, and the children die with it. Before `npx pm2 restart c3` (or delete/start), check nothing is mid-run: `tail ~/.c3/logs/c3-out.log` for recent session starts without a matching end, or the running entries with a fresh `updatedAt` in `~/.ccc/data/sessions.json` (stale `running` rows are orphans from earlier restarts; only a recent timestamp means live). The sessionManager is a globalThis singleton shared by the tsx graph and the .next bundle; a change to `server.ts` or `src/lib` needs `npm run build` plus a c3 restart to reach both sides.
+
 ## What This Is
 
 C3 is a web layer on top of the Claude Code SDK. It does two things:
