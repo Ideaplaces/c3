@@ -8,9 +8,15 @@ import { getSession } from '@/lib/store/sessions'
 import { statSync } from 'fs'
 
 const clientSessions = new Map<WebSocket, Set<string>>()
+// One relay (sdk_event + session_ended listener pair) per socket per session.
+// Relays used to be removed only on session_ended, so a socket that dropped
+// mid-session left its listeners on the sessionManager forever, and every
+// reconnect-and-resubscribe added another pair.
+const clientRelays = new Map<WebSocket, Map<string, () => void>>()
 
 export function handleConnection(ws: WebSocket, user: UserPayload) {
   clientSessions.set(ws, new Set())
+  clientRelays.set(ws, new Map())
 
   send(ws, { type: 'authenticated', user })
 
@@ -25,8 +31,46 @@ export function handleConnection(ws: WebSocket, user: UserPayload) {
 
   ws.on('close', () => {
     console.log(`WebSocket closed for ${user.email}`)
+    const relays = clientRelays.get(ws)
+    if (relays) {
+      for (const detach of [...relays.values()]) detach()
+    }
+    clientRelays.delete(ws)
     clientSessions.delete(ws)
   })
+}
+
+// Relay the sessionManager's events for one session to one socket. Closing the
+// socket, or the session ending, detaches the pair. The session itself is
+// owned by the sessionManager and keeps running whether or not any socket is
+// attached; this is a viewer, not the owner.
+function attachRelay(ws: WebSocket, sessionId: string) {
+  const relays = clientRelays.get(ws)
+  if (!relays || relays.has(sessionId)) return
+
+  const onSdkEvent = (sid: string, sdkMessage: unknown) => {
+    if (sid === sessionId) {
+      send(ws, { type: 'sdk_event', sessionId, message: sdkMessage as SDKMessage })
+    }
+  }
+
+  const onSessionEnded = (sid: string, reason: string) => {
+    if (sid === sessionId) {
+      send(ws, { type: 'session_ended', sessionId, reason })
+      detach()
+      clientSessions.get(ws)?.delete(sessionId)
+    }
+  }
+
+  const detach = () => {
+    sessionManager.removeListener('sdk_event', onSdkEvent)
+    sessionManager.removeListener('session_ended', onSessionEnded)
+    clientRelays.get(ws)?.delete(sessionId)
+  }
+
+  sessionManager.on('sdk_event', onSdkEvent)
+  sessionManager.on('session_ended', onSessionEnded)
+  relays.set(sessionId, detach)
 }
 
 async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientMessage) {
@@ -44,25 +88,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
 
         // Track this session for this WebSocket
         clientSessions.get(ws)?.add(sessionId)
-
-        // Set up event relay
-        const onSdkEvent = (sid: string, sdkMessage: unknown) => {
-          if (sid === sessionId) {
-            send(ws, { type: 'sdk_event', sessionId, message: sdkMessage as SDKMessage })
-          }
-        }
-
-        const onSessionEnded = (sid: string, reason: string) => {
-          if (sid === sessionId) {
-            send(ws, { type: 'session_ended', sessionId, reason })
-            sessionManager.removeListener('sdk_event', onSdkEvent)
-            sessionManager.removeListener('session_ended', onSessionEnded)
-            clientSessions.get(ws)?.delete(sessionId)
-          }
-        }
-
-        sessionManager.on('sdk_event', onSdkEvent)
-        sessionManager.on('session_ended', onSessionEnded)
+        attachRelay(ws, sessionId)
 
         send(ws, { type: 'session_started', sessionId })
       } catch (error) {
@@ -75,23 +101,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
       try {
         // Set up event relay if not already listening
         const sessionId = message.sessionId
-
-        const onSdkEvent = (sid: string, sdkMessage: unknown) => {
-          if (sid === sessionId) {
-            send(ws, { type: 'sdk_event', sessionId, message: sdkMessage as SDKMessage })
-          }
-        }
-
-        const onSessionEnded = (sid: string, reason: string) => {
-          if (sid === sessionId) {
-            send(ws, { type: 'session_ended', sessionId, reason })
-            sessionManager.removeListener('sdk_event', onSdkEvent)
-            sessionManager.removeListener('session_ended', onSessionEnded)
-          }
-        }
-
-        sessionManager.on('sdk_event', onSdkEvent)
-        sessionManager.on('session_ended', onSessionEnded)
+        attachRelay(ws, sessionId)
 
         await sessionManager.resumeSession(message.sessionId, message.prompt)
         send(ws, { type: 'session_started', sessionId: message.sessionId })
@@ -115,23 +125,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
           }
 
           send(ws, { type: 'session_started', sessionId })
-
-          const onSdkEvent = (sid: string, sdkMessage: unknown) => {
-            if (sid === sessionId) {
-              send(ws, { type: 'sdk_event', sessionId, message: sdkMessage as SDKMessage })
-            }
-          }
-
-          const onSessionEnded = (sid: string, reason: string) => {
-            if (sid === sessionId) {
-              send(ws, { type: 'session_ended', sessionId, reason })
-              sessionManager.removeListener('sdk_event', onSdkEvent)
-              sessionManager.removeListener('session_ended', onSessionEnded)
-            }
-          }
-
-          sessionManager.on('sdk_event', onSdkEvent)
-          sessionManager.on('session_ended', onSessionEnded)
+          attachRelay(ws, sessionId)
         } else {
           // Session not in active map. Could be completed, or still running
           // but we lost track (e.g., after a PM2 restart).

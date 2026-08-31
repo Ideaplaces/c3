@@ -3,7 +3,7 @@ import { parse } from 'url'
 import fs from 'fs'
 import path from 'path'
 import next from 'next'
-import { WebSocketServer } from 'ws'
+import { WebSocketServer, type WebSocket } from 'ws'
 import { verifyToken } from './src/lib/auth/jwt.js'
 import { handleConnection } from './src/lib/ws/handler.js'
 
@@ -45,6 +45,32 @@ app.prepare().then(() => {
   })
 
   const wss = new WebSocketServer({ noServer: true })
+
+  // Heartbeat. cloudflared drops an idle WebSocket after roughly 100 seconds,
+  // which put every browser tab on a permanent 2-minute reconnect loop (see
+  // the "WebSocket closed" pairs in c3-out.log, always ~126s apart). A 30s
+  // server ping keeps traffic on the tunnel, and a missed pong lets us reap
+  // sockets whose peer is truly gone instead of leaking them.
+  type LiveWebSocket = WebSocket & { isAlive?: boolean }
+
+  wss.on('connection', (ws: LiveWebSocket) => {
+    ws.isAlive = true
+    ws.on('pong', () => {
+      ws.isAlive = true
+    })
+  })
+
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients as Set<LiveWebSocket>) {
+      if (client.isAlive === false) {
+        client.terminate()
+        continue
+      }
+      client.isAlive = false
+      client.ping()
+    }
+  }, 30_000)
+  heartbeat.unref?.()
 
   server.on('upgrade', (request, socket, head) => {
     const { pathname, query } = parse(request.url!, true)
