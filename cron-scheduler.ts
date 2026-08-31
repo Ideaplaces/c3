@@ -173,6 +173,8 @@ async function checkAndFire(trigger: CronTrigger) {
     const result = await res.json() as { sessionId?: string; error?: string }
     if (res.ok && result.sessionId) {
       console.log(`[Cron Scheduler] Session started: ${result.sessionId} for "${trigger.name}"`)
+    } else if (res.ok && result.status === 'skipped') {
+      console.log(`[Cron Scheduler] Precheck skipped "${trigger.name}": ${result.reason}`)
     } else {
       console.error(`[Cron Scheduler] Webhook error for "${trigger.name}":`, result.error)
     }
