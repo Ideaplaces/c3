@@ -16,7 +16,11 @@ module.exports = {
       watch: process.env.C3_DEV === 'true' ? ['server.ts', 'src/lib', 'src/app/api'] : false,
       watch_delay: 1000,
       ignore_watch: ['node_modules', '.next', 'tests', '.git'],
-      max_memory_restart: '500M',
+      // Every c3 restart kills every live session (the SDK's claude children
+      // die with the process). At 500M pm2 restarted c3 8 times in 2 days,
+      // each one taking down whatever was running. The box has 64G; give the
+      // process room and let restarts be rare, deliberate events.
+      max_memory_restart: '2G',
       error_file: path.join(logsDir, 'c3-error.log'),
       out_file: path.join(logsDir, 'c3-out.log'),
       merge_logs: true,
