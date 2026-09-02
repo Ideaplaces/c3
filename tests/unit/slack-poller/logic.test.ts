@@ -142,6 +142,30 @@ describe('hasProcessedReaction', () => {
   })
 })
 
+describe('extractFullText with section fields', () => {
+  it('keeps the fields of a section block, not only its text', () => {
+    const msg: SlackMessage = {
+      text: ':red_circle: NPS 4/10 from Marcelle Ngounou (Mentor, Circonflexe)',
+      ts: '1788361833.704749',
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: ':red_circle: *4/10 · Detractor*' } },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: '*Who*\nMarcelle Ngounou' },
+            { type: 'mrkdwn', text: '*Email*\n<mailto:m@example.com|m@example.com>' },
+          ],
+        },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: '_No comment left._' }] },
+      ],
+    }
+    const text = extractFullText(msg)
+    expect(text).toContain('*Who*\nMarcelle Ngounou')
+    expect(text).toContain('m@example.com')
+    expect(text).toContain('_No comment left._')
+  })
+})
+
 describe('checkCooldown', () => {
   it('returns 0 when no previous session', () => {
     const times = new Map<string, number>()

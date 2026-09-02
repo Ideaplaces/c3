@@ -48,8 +48,13 @@ export function extractFullText(msg: SlackMessage): string {
     for (const block of msg.blocks) {
       if (block.type === 'header' && block.text?.text) {
         blockTexts.push(block.text.text)
-      } else if (block.type === 'section' && block.text?.text) {
-        blockTexts.push(block.text.text)
+      } else if (block.type === 'section' && (block.text?.text || block.fields)) {
+        // A section carries text, fields (the two-column key/value grid), or
+        // both. The NPS notification puts who/role/program/email in fields.
+        if (block.text?.text) blockTexts.push(block.text.text)
+        for (const field of block.fields || []) {
+          if (field.text) blockTexts.push(field.text)
+        }
       } else if (block.type === 'context' && block.elements) {
         for (const el of block.elements) {
           if (el.text) blockTexts.push(el.text)
