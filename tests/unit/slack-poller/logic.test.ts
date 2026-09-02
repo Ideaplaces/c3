@@ -184,6 +184,14 @@ describe('checkCooldown', () => {
     expect(checkCooldown('C456', times, now)).toBe(0)
     expect(checkCooldown('C789', times, now)).toBe(0) // never seen
   })
+
+  it('honours a per-trigger cooldown instead of the default', () => {
+    const times = new Map<string, number>()
+    const now = Date.now()
+    times.set('C123', now - 30_000) // 30 seconds ago
+    expect(checkCooldown('C123', times, now, 60_000)).toBe(30_000)
+    expect(checkCooldown('C123', times, now, 0)).toBe(0)
+  })
 })
 
 describe('shouldProcessMessage', () => {
@@ -196,6 +204,17 @@ describe('shouldProcessMessage', () => {
   it('returns process:true for a fresh message with no cooldown', () => {
     const result = shouldProcessMessage(makeMsg(), 'C123', new Map())
     expect(result.process).toBe(true)
+  })
+
+  it('processes back-to-back messages when the trigger sets cooldownMs 0', () => {
+    const times = new Map<string, number>()
+    const now = Date.now()
+    times.set('C123', now) // a session started this instant
+    const withDefault = shouldProcessMessage(makeMsg(), 'C123', times, now)
+    expect(withDefault.process).toBe(false)
+    expect(withDefault.reason).toMatch(/^rate_limited_/)
+    const withZero = shouldProcessMessage(makeMsg(), 'C123', times, now, undefined, 0)
+    expect(withZero).toEqual({ process: true })
   })
 
   it('returns process:false for a message with eyes reaction', () => {

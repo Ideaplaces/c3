@@ -66,6 +66,14 @@ cp prompts/*.md ~/.c3/prompts/
 # Edit ~/.c3/triggers.json with your channel IDs and project paths
 ```
 
+### Slack triggers: one session per message, or one per burst
+
+The poller starts at most one session per channel every 5 minutes; a second
+message inside that window is skipped and never retried. That is right for an
+alert channel, where a burst is one incident. A channel where every message is
+its own case (an NPS score, a support ticket) sets `"cooldownMs": 0` on the
+trigger so nothing is dropped.
+
 ### Answering a Slack alert in Discord instead of Slack
 
 A Slack trigger can carry `discordChannelId`. When it does, C3 copies the alert

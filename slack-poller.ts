@@ -30,6 +30,9 @@ interface SlackTrigger {
   model: string
   slackBotToken?: string
   pollIntervalMs?: number
+  // Minimum gap between two sessions on this channel. Defaults to COOLDOWN_MS
+  // (5 minutes). 0 for channels where every message is its own case.
+  cooldownMs?: number
   // When true, the poller never writes to the channel: no 👀 marker on the
   // alert. Dedup falls back to the local processed ledger in the state file.
   // Used on channels shared with a team, where a reaction reads as "someone is
@@ -222,6 +225,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       lastSessionTime,
       Date.now(),
       useReaction ? undefined : { processedTs: state.processed?.[trigger.channelId] },
+      trigger.cooldownMs,
     )
     if (!decision.process) {
       console.log(`[Slack Poller] Skipping message ${msg.ts}: ${decision.reason}`)

@@ -11,6 +11,13 @@ export interface ChannelTrigger {
    * was already investigated this week instead of paying for it again.
    */
   precheck?: string
+  /**
+   * Minimum gap in ms between two sessions on this channel. Defaults to the
+   * poller's 5 minutes, which folds an alert burst into one investigation.
+   * Set 0 on a channel where every message is its own case (NPS scores,
+   * support tickets); a message skipped for cooldown is never retried.
+   */
+  cooldownMs?: number
   channelId: string
   prompt: string
   projectPath: string

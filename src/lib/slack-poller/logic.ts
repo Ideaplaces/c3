@@ -147,12 +147,13 @@ export function markProcessed(
 export function checkCooldown(
   channelId: string,
   lastSessionTimes: Map<string, number>,
-  now: number = Date.now()
+  now: number = Date.now(),
+  cooldownMs: number = COOLDOWN_MS
 ): number {
   const lastTime = lastSessionTimes.get(channelId) || 0
   const elapsed = now - lastTime
-  if (elapsed < COOLDOWN_MS) {
-    return COOLDOWN_MS - elapsed
+  if (elapsed < cooldownMs) {
+    return cooldownMs - elapsed
   }
   return 0
 }
@@ -163,13 +164,20 @@ export function checkCooldown(
  *
  * Pass `dedup` for triggers that do not use the 👀 reaction: the local ledger
  * of processed timestamps then decides, instead of reactions on the message.
+ *
+ * `cooldownMs` is the per-channel minimum gap between two sessions. The
+ * default suits alert channels, where a burst is one incident repeated. A
+ * channel where every message is its own case (an NPS score, a support
+ * ticket) sets it to 0, otherwise the second message of a burst is dropped
+ * for good: the poller advances past it and never looks again.
  */
 export function shouldProcessMessage(
   message: SlackMessage,
   channelId: string,
   lastSessionTimes: Map<string, number>,
   now: number = Date.now(),
-  dedup?: { processedTs: string[] | undefined }
+  dedup?: { processedTs: string[] | undefined },
+  cooldownMs: number = COOLDOWN_MS
 ): { process: boolean; reason?: string } {
   const alreadyProcessed = dedup
     ? isProcessed(dedup.processedTs, message.ts)
@@ -179,7 +187,7 @@ export function shouldProcessMessage(
   }
 
   // Check cooldown
-  const cooldownRemaining = checkCooldown(channelId, lastSessionTimes, now)
+  const cooldownRemaining = checkCooldown(channelId, lastSessionTimes, now, cooldownMs)
   if (cooldownRemaining > 0) {
     return { process: false, reason: `rate_limited_${Math.round(cooldownRemaining / 1000)}s` }
   }
