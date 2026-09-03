@@ -6,10 +6,14 @@ import {
   DEFAULT_BOT_NAME,
   selectTriggersForBot,
   shouldFire,
+  shouldFireMention,
+  stripMention,
+  composeMentionText,
   extractDiscordText,
   threadNameFor,
   formatSessionResult,
   type BotChannelTrigger,
+  type DiscordMessageLike,
 } from './src/lib/discord-bot/logic.js'
 
 // Load .env.local manually (no dotenv dependency)
@@ -108,6 +112,18 @@ client.on('ready', () => {
   console.log(`[Bot] Watching ${triggers.length} channels: ${triggers.map(t => `${t.name}=${t.channelId}`).join(', ')}`)
 })
 
+function toLike(msg: Message): DiscordMessageLike {
+  return {
+    content: msg.content,
+    embeds: msg.embeds.map(e => e.toJSON()),
+    attachments: [...msg.attachments.values()].map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
+    webhookId: msg.webhookId,
+    authorIsBot: msg.author.bot,
+    mentionsBot: client.user ? msg.mentions.users.has(client.user.id) : false,
+    referencedMessageId: msg.reference?.messageId ?? null,
+  }
+}
+
 async function react(msg: Message, emoji: string) {
   try {
     await msg.react(emoji)
@@ -125,16 +141,26 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   const trigger = myTriggers().find(t => t.channelId === msg.channelId)
   if (!trigger) return { started: false, reason: 'channel not served by this bot' }
 
-  const like = {
-    content: msg.content,
-    embeds: msg.embeds.map(e => e.toJSON()),
-    attachments: [...msg.attachments.values()].map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
-    webhookId: msg.webhookId,
-    authorIsBot: msg.author.bot,
+  const like = toLike(msg)
+  let text: string
+  // The message the session is about and the one that gets the thread: the
+  // triggering message itself, or, for a mention trigger, the report the
+  // person replied to.
+  let subject: Message = msg
+  if (trigger.mention) {
+    const referenced = like.referencedMessageId
+      ? await msg.channel.messages.fetch(like.referencedMessageId).catch(() => null)
+      : null
+    if (!shouldFireMention(trigger, like, referenced ? toLike(referenced) : null)) {
+      return { started: false, reason: 'not a reply that mentions the bot on a matching message' }
+    }
+    subject = referenced as Message
+    const request = stripMention(msg.content, client.user?.id ?? '')
+    text = composeMentionText(toLike(subject), msg.author.username, request)
+  } else {
+    if (!shouldFire(trigger, like)) return { started: false, reason: 'message does not match the trigger' }
+    text = extractDiscordText(like)
   }
-  if (!shouldFire(trigger, like)) return { started: false, reason: 'message does not match the trigger' }
-
-  const text = extractDiscordText(like)
   console.log(`[Bot] ${source} message ${msg.id} in ${trigger.name} from ${msg.author.username}: ${text.slice(0, 100).replace(/\n/g, ' ')}`)
 
   await react(msg, '👀')
@@ -142,14 +168,14 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   let threadId: string | undefined
   if (trigger.thread) {
     try {
-      const existing = msg.thread ?? (msg.hasThread ? await msg.channel.messages.fetch(msg.id).then(m => m.thread) : null)
-      const thread = existing ?? await msg.startThread({
-        name: threadNameFor(msg.embeds.length ? like : { content: msg.content }),
+      const existing = subject.thread ?? (subject.hasThread ? await subject.channel.messages.fetch(subject.id).then(m => m.thread) : null)
+      const thread = existing ?? await subject.startThread({
+        name: threadNameFor(toLike(subject)),
         autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays,
       })
       threadId = thread.id
     } catch (err) {
-      console.error(`[Bot] Could not open a thread on ${msg.id}, replying in channel instead:`, err)
+      console.error(`[Bot] Could not open a thread on ${subject.id}, replying in channel instead:`, err)
     }
   }
 
@@ -164,7 +190,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
         channelId: msg.channelId,
         message: text,
         author: msg.author.username,
-        messageId: msg.id,
+        messageId: subject.id,
         threadId,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),
@@ -173,7 +199,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
     const data = await response.json() as { sessionId?: string; trigger?: string; error?: string }
 
     if (response.ok && data.sessionId) {
-      pendingSessions.set(data.sessionId, { channelId: msg.channelId, messageId: msg.id, threadId })
+      pendingSessions.set(data.sessionId, { channelId: msg.channelId, messageId: subject.id, threadId })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
       if (threadId) {
         const thread = await client.channels.fetch(threadId).catch(() => null)

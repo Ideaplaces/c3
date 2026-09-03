@@ -44,6 +44,13 @@ export interface ChannelTrigger {
    */
   thread?: boolean
   /**
+   * When true, nothing fires on its own: a person replies to a message with
+   * an @mention of the bot, and the replied-to message becomes the subject
+   * of the session, the person's words the request. The human decides which
+   * reports are worth a session. `webhookId` then applies to the subject.
+   */
+  mention?: boolean
+  /**
    * Bot token the webhook route posts replies with, for a trigger served by a
    * bot other than the default one. Usually `${SOME_ENV_VAR}`, expanded from
    * the server's environment like slackBotToken.

@@ -29,6 +29,10 @@ export interface DiscordMessageLike {
   attachments?: DiscordAttachmentLike[]
   webhookId?: string | null
   authorIsBot?: boolean
+  /** Whether this bot's user is @mentioned in the message. */
+  mentionsBot?: boolean
+  /** The message this one replies to, when it is a reply. */
+  referencedMessageId?: string | null
 }
 
 export interface BotChannelTrigger {
@@ -40,6 +44,41 @@ export interface BotChannelTrigger {
   webhookId?: string
   /** When true, the bot opens a thread on the message and the session replies there. */
   thread?: boolean
+  /**
+   * When true, nothing fires on its own. A person replies to a message with
+   * an @mention of the bot, and that replied-to message becomes the subject
+   * of the session, with the person's words as the request. `webhookId` then
+   * applies to the subject, not to the reply.
+   */
+  mention?: boolean
+}
+
+/**
+ * Whether a reply that @mentions the bot should start a session on the
+ * message it replies to. The mention is the human's decision to spend a
+ * session; a mention with no reply has no subject and is ignored.
+ */
+export function shouldFireMention(
+  trigger: BotChannelTrigger,
+  reply: DiscordMessageLike,
+  subject: DiscordMessageLike | null,
+): boolean {
+  if (!trigger.mention) return false
+  if (reply.authorIsBot || !reply.mentionsBot || !reply.referencedMessageId) return false
+  if (!subject) return false
+  if (trigger.webhookId) return subject.webhookId === trigger.webhookId
+  return true
+}
+
+/** The mention of the bot removed, so the request reads as the person wrote it. */
+export function stripMention(content: string, botUserId: string): string {
+  return content.replace(new RegExp(`<@!?${botUserId}>`, 'g'), '').replace(/\s+/g, ' ').trim()
+}
+
+/** The session text for a mention: the subject in full, then what the person asked. */
+export function composeMentionText(subject: DiscordMessageLike, author: string, request: string): string {
+  const ask = request || 'Take care of this one.'
+  return `${extractDiscordText(subject)}\n\nRequest from ${author}: ${ask}`
 }
 
 export const DEFAULT_BOT_NAME = 'default'

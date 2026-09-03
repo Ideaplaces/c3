@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   selectTriggersForBot,
   shouldFire,
+  shouldFireMention,
+  stripMention,
+  composeMentionText,
   extractDiscordText,
   threadNameFor,
   formatSessionResult,
@@ -45,6 +48,40 @@ describe('shouldFire', () => {
     expect(shouldFire(open, { content: 'x', authorIsBot: false })).toBe(true)
     expect(shouldFire(open, { content: 'x', webhookId: 'any', authorIsBot: true })).toBe(true)
     expect(shouldFire(open, { content: 'x', authorIsBot: true })).toBe(false)
+  })
+})
+
+describe('shouldFireMention', () => {
+  const trigger = { name: 'feedback', channelId: '2', mention: true, webhookId: 'hook-1' }
+  const report = { content: '', embeds: [feedbackEmbed], webhookId: 'hook-1', authorIsBot: true }
+  const reply = { content: '<@99> fix this one', mentionsBot: true, referencedMessageId: 'r1', authorIsBot: false }
+
+  it('fires only for a human reply that mentions the bot on a report from the pinned webhook', () => {
+    expect(shouldFireMention(trigger, reply, report)).toBe(true)
+    expect(shouldFireMention(trigger, { ...reply, mentionsBot: false }, report)).toBe(false)
+    expect(shouldFireMention(trigger, { ...reply, referencedMessageId: null }, report)).toBe(false)
+    expect(shouldFireMention(trigger, { ...reply, authorIsBot: true }, report)).toBe(false)
+    expect(shouldFireMention(trigger, reply, { ...report, webhookId: 'other' })).toBe(false)
+    expect(shouldFireMention(trigger, reply, null)).toBe(false)
+  })
+
+  it('never fires for a trigger that is not in mention mode', () => {
+    expect(shouldFireMention({ ...trigger, mention: false }, reply, report)).toBe(false)
+  })
+})
+
+describe('stripMention and composeMentionText', () => {
+  it('removes the bot mention in both forms and keeps the request', () => {
+    expect(stripMention('<@99> fix this one', '99')).toBe('fix this one')
+    expect(stripMention('fix <@!99>  this one', '99')).toBe('fix this one')
+  })
+
+  it('puts the subject first and the request last, with a default when the person said nothing', () => {
+    const subject = { content: '', embeds: [feedbackEmbed] }
+    const text = composeMentionText(subject, 'lucararau9867', 'fix this one')
+    expect(text.startsWith('**🔴 Broken**\nje peux pas mettre 8-10')).toBe(true)
+    expect(text.endsWith('\n\nRequest from lucararau9867: fix this one')).toBe(true)
+    expect(composeMentionText(subject, 'luca', '').endsWith('Request from luca: Take care of this one.')).toBe(true)
   })
 })
 
