@@ -90,6 +90,28 @@ together. The agent's prompt must then treat its final message as the
 deliverable and never post anywhere itself. See
 `src/lib/webhooks/discord-mirror.ts`.
 
+### A second Discord bot identity for a server the default bot is not in
+
+`discord-bot.ts` runs once per bot token. Two processes on one token would each
+receive every event and start every session twice, so a bot that lives in
+another server gets its own process and its own name. In `ecosystem.config.cjs`
+the process sets `C3_DISCORD_BOT=<name>` and `C3_DISCORD_BOT_TOKEN_ENV=<env var
+holding the token>` (the var lives in `.env.local`), and every trigger it should
+serve carries `"bot": "<name>"`. Triggers without a `bot` field stay with the
+default process. The reference is `c3-discord-bot-spotter`, the Gymswell
+feedback bot.
+
+Three more channel trigger fields came with it. `webhookId` pins the trigger
+to one webhook, so people can talk in the channel next to an app's reports
+without starting a session each time. `thread: true` opens a thread on the
+message and every reply goes there. `discordBotToken` (usually `${VAR}`) is
+what the webhook route posts the completion notice with, since the reply has
+to come from the bot that is a member of that server. Embeds and attachments
+are folded into the session text; a report posted as an embed used to reach
+the agent as an empty message. `POST /replay {channelId, messageId}` on the
+bot's port (with the webhook secret as bearer) runs an existing message through
+the live path: that is the backfill.
+
 ## Auth
 
 Three options (configured via .env.local):
