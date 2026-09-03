@@ -1,7 +1,16 @@
-import { Client, GatewayIntentBits, TextChannel } from 'discord.js'
+import { Client, GatewayIntentBits, TextChannel, ThreadAutoArchiveDuration, type Message } from 'discord.js'
 import fs from 'fs'
 import path from 'path'
 import http from 'http'
+import {
+  DEFAULT_BOT_NAME,
+  selectTriggersForBot,
+  shouldFire,
+  extractDiscordText,
+  threadNameFor,
+  formatSessionResult,
+  type BotChannelTrigger,
+} from './src/lib/discord-bot/logic.js'
 
 // Load .env.local manually (no dotenv dependency)
 try {
@@ -23,9 +32,7 @@ try {
 }
 
 // Load triggers config to know which channels to watch
-interface ChannelTrigger {
-  name: string
-  channelId: string
+interface ChannelTrigger extends BotChannelTrigger {
   prompt: string
   projectPath: string
   permissionMode: string
@@ -53,7 +60,6 @@ function findTriggersJson(): string {
 
 function loadTriggers(): TriggersConfig {
   const triggersPath = findTriggersJson()
-  console.log(`[Bot] Loading triggers from ${triggersPath}`)
   try {
     return JSON.parse(fs.readFileSync(triggersPath, 'utf-8'))
   } catch {
@@ -62,12 +68,31 @@ function loadTriggers(): TriggersConfig {
   }
 }
 
+// Which identity this process is. The default bot serves every trigger with
+// no `bot` field; a named one (C3_DISCORD_BOT=spotter) serves only the
+// triggers that name it, with the token in the env var named by
+// C3_DISCORD_BOT_TOKEN_ENV. See ecosystem.config.cjs.
+const BOT_NAME = process.env.C3_DISCORD_BOT || DEFAULT_BOT_NAME
+const TOKEN_ENV = process.env.C3_DISCORD_BOT_TOKEN_ENV || 'DISCORD_BOT_TOKEN'
+
+/** The triggers this process serves, read fresh so an edit to triggers.json needs no restart. */
+function myTriggers(): ChannelTrigger[] {
+  return selectTriggersForBot(loadTriggers().channels, BOT_NAME)
+}
+
 const CCC_URL = process.env.CCC_URL || 'http://localhost:8347'
 const CCC_WEBHOOK_SECRET = process.env.CCC_WEBHOOK_SECRET || ''
 const BOT_PORT = parseInt(process.env.BOT_PORT || '8348', 10)
+const BASE_URL = process.env.C3_BASE_URL || CCC_URL
 
-// Track message IDs to reply to when session completes
-const pendingSessions = new Map<string, { channelId: string; messageId: string }>()
+// Where to post when a session completes: the thread the bot opened, or the
+// channel as a reply to the triggering message.
+interface PendingSession {
+  channelId: string
+  messageId: string
+  threadId?: string
+}
+const pendingSessions = new Map<string, PendingSession>()
 
 const client = new Client({
   intents: [
@@ -78,33 +103,54 @@ const client = new Client({
 })
 
 client.on('ready', () => {
-  const triggers = loadTriggers()
-  const channelIds = Object.values(triggers.channels).map(t => t.channelId)
-  console.log(`[Bot] Logged in as ${client.user?.tag}`)
-  console.log(`[Bot] Watching ${channelIds.length} channels: ${channelIds.join(', ')}`)
+  const triggers = myTriggers()
+  console.log(`[Bot] Logged in as ${client.user?.tag} (bot "${BOT_NAME}", triggers from ${findTriggersJson()})`)
+  console.log(`[Bot] Watching ${triggers.length} channels: ${triggers.map(t => `${t.name}=${t.channelId}`).join(', ')}`)
 })
 
-client.on('messageCreate', async (msg) => {
-  // Ignore our own messages to prevent loops.
-  if (msg.author.id === client.user?.id) return
-
-  // Ignore other bots, but allow webhook-posted messages (e.g. Azure Function
-  // error summarizers, GitHub/Linear notifiers) so they can trigger sessions.
-  if (msg.author.bot && !msg.webhookId) return
-
-  const triggers = loadTriggers()
-  const watchedChannels = new Set(Object.values(triggers.channels).map(t => t.channelId))
-
-  // Only process messages from configured channels
-  if (!watchedChannels.has(msg.channelId)) return
-
-  console.log(`[Bot] Message in ${msg.channelId} from ${msg.author.username}: ${msg.content.slice(0, 100)}`)
-
-  // React with eyes to show we're processing
+async function react(msg: Message, emoji: string) {
   try {
-    await msg.react('👀')
+    await msg.react(emoji)
   } catch {
-    // Ignore reaction errors
+    // Reactions are a courtesy; a missing permission must not stop the session.
+  }
+}
+
+/**
+ * Start a session for one message. Shared by the gateway listener and the
+ * /replay endpoint, so a report that arrived before the bot was watching (or
+ * while it was down) goes through exactly the path a live one does.
+ */
+async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
+  const trigger = myTriggers().find(t => t.channelId === msg.channelId)
+  if (!trigger) return { started: false, reason: 'channel not served by this bot' }
+
+  const like = {
+    content: msg.content,
+    embeds: msg.embeds.map(e => e.toJSON()),
+    attachments: [...msg.attachments.values()].map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
+    webhookId: msg.webhookId,
+    authorIsBot: msg.author.bot,
+  }
+  if (!shouldFire(trigger, like)) return { started: false, reason: 'message does not match the trigger' }
+
+  const text = extractDiscordText(like)
+  console.log(`[Bot] ${source} message ${msg.id} in ${trigger.name} from ${msg.author.username}: ${text.slice(0, 100).replace(/\n/g, ' ')}`)
+
+  await react(msg, '👀')
+
+  let threadId: string | undefined
+  if (trigger.thread) {
+    try {
+      const existing = msg.thread ?? (msg.hasThread ? await msg.channel.messages.fetch(msg.id).then(m => m.thread) : null)
+      const thread = existing ?? await msg.startThread({
+        name: threadNameFor(msg.embeds.length ? like : { content: msg.content }),
+        autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays,
+      })
+      threadId = thread.id
+    } catch (err) {
+      console.error(`[Bot] Could not open a thread on ${msg.id}, replying in channel instead:`, err)
+    }
   }
 
   try {
@@ -116,9 +162,10 @@ client.on('messageCreate', async (msg) => {
       },
       body: JSON.stringify({
         channelId: msg.channelId,
-        message: msg.content,
+        message: text,
         author: msg.author.username,
         messageId: msg.id,
+        threadId,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),
     })
@@ -126,92 +173,110 @@ client.on('messageCreate', async (msg) => {
     const data = await response.json() as { sessionId?: string; trigger?: string; error?: string }
 
     if (response.ok && data.sessionId) {
-      // Track this session so we can reply when it completes
-      pendingSessions.set(data.sessionId, {
-        channelId: msg.channelId,
-        messageId: msg.id,
-      })
-
+      pendingSessions.set(data.sessionId, { channelId: msg.channelId, messageId: msg.id, threadId })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
-    } else {
-      console.error(`[Bot] Webhook failed:`, data.error)
-      try {
-        await msg.react('❌')
-      } catch {
-        // Ignore
+      if (threadId) {
+        const thread = await client.channels.fetch(threadId).catch(() => null)
+        if (thread?.isThread()) {
+          await thread.send(`On it. Session: ${BASE_URL}/sessions/${data.sessionId}`).catch(() => {})
+        }
       }
+      return { started: true, sessionId: data.sessionId, threadId }
     }
+    console.error(`[Bot] Webhook failed:`, data.error)
+    await react(msg, '❌')
+    return { started: false, reason: data.error || `HTTP ${response.status}` }
   } catch (err) {
     console.error(`[Bot] Error calling CCC webhook:`, err)
-    try {
-      await msg.react('❌')
-    } catch {
-      // Ignore
-    }
+    await react(msg, '❌')
+    return { started: false, reason: String(err) }
   }
+}
+
+client.on('messageCreate', async (msg) => {
+  // Ignore our own messages to prevent loops.
+  if (msg.author.id === client.user?.id) return
+  if (!myTriggers().some(t => t.channelId === msg.channelId)) return
+  await handleMessage(msg, 'gateway')
 })
 
-// HTTP server to receive session completion callbacks from CCC
-const callbackServer = http.createServer(async (req, res) => {
-  if (req.method === 'POST' && req.url === '/callback') {
+function readJsonBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
     let body = ''
     req.on('data', (chunk: Buffer) => { body += chunk.toString() })
-    req.on('end', async () => {
-      try {
-        const data = JSON.parse(body) as { sessionId: string; reason: string; summary: string; projectPath?: string }
-        const pending = pendingSessions.get(data.sessionId)
+    req.on('end', () => resolve(body))
+  })
+}
 
-        if (pending) {
-          pendingSessions.delete(data.sessionId)
+// Post the completion notice where the session was announced. The server
+// already posts one itself when it has a token for this bot (`replied: true`
+// in the payload); this path covers the case where it does not.
+async function onSessionCallback(body: string) {
+  const data = JSON.parse(body) as {
+    sessionId: string; reason: string; summary: string; projectPath?: string
+    failed?: boolean; failureReason?: string; replied?: boolean
+  }
+  const pending = pendingSessions.get(data.sessionId)
+  if (!pending) return
+  pendingSessions.delete(data.sessionId)
+  if (data.replied) return
 
-          const channel = client.channels.cache.get(pending.channelId) as TextChannel | undefined
-          if (channel) {
-            // Truncate summary for Discord (2000 char limit)
-            const truncatedSummary = data.summary.length > 1800
-              ? data.summary.slice(0, 1800) + '...'
-              : data.summary
+  const content = formatSessionResult(data, BASE_URL)
+  const target = await client.channels.fetch(pending.threadId ?? pending.channelId).catch(() => null)
+  if (!target || !('send' in target)) return
+  if (pending.threadId) {
+    await (target as TextChannel).send(content)
+    console.log(`[Bot] Posted session result in thread ${pending.threadId}`)
+    return
+  }
+  try {
+    const originalMessage = await (target as TextChannel).messages.fetch(pending.messageId)
+    await originalMessage.reply(content)
+    console.log(`[Bot] Replied to message ${pending.messageId} with session result`)
+  } catch {
+    await (target as TextChannel).send(content)
+    console.log(`[Bot] Posted session result in channel ${pending.channelId}`)
+  }
+}
 
-            const baseUrl = process.env.C3_BASE_URL || CCC_URL
-            const resumeLines: string[] = []
-            if (data.projectPath) {
-              resumeLines.push(
-                `Resume in terminal:`,
-                '```',
-                `cd ${data.projectPath} && claude --resume ${data.sessionId} --dangerously-skip-permissions`,
-                '```',
-              )
-            }
-            const replyContent = [
-              `**Session completed** (\`${data.sessionId.slice(0, 8)}\`)`,
-              '',
-              truncatedSummary,
-              '',
-              `View full session: ${baseUrl}/sessions/${data.sessionId}`,
-              ...resumeLines,
-            ].join('\n')
+// Run an existing message through the same path as a live one. Used to
+// backfill a channel's history and to retry a report the bot missed.
+async function onReplay(body: string) {
+  const { channelId, messageId } = JSON.parse(body) as { channelId: string; messageId: string }
+  const channel = await client.channels.fetch(channelId)
+  if (!channel || !channel.isTextBased()) throw new Error(`channel ${channelId} is not a text channel`)
+  const msg = await (channel as TextChannel).messages.fetch(messageId)
+  return handleMessage(msg, 'replay')
+}
 
-            try {
-              // Reply to the original message
-              const originalMessage = await channel.messages.fetch(pending.messageId)
-              await originalMessage.reply(replyContent)
-              console.log(`[Bot] Replied to message ${pending.messageId} with session result`)
-            } catch {
-              // If we can't reply to the message, post in the channel
-              await channel.send(replyContent)
-              console.log(`[Bot] Posted session result in channel ${pending.channelId}`)
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`[Bot] Callback error:`, err)
-      }
-
-      res.writeHead(200)
-      res.end('ok')
-    })
-  } else {
+// HTTP server: session completion callbacks from C3, and replays.
+const callbackServer = http.createServer(async (req, res) => {
+  if (req.method !== 'POST' || (req.url !== '/callback' && req.url !== '/replay')) {
     res.writeHead(404)
     res.end('not found')
+    return
+  }
+  const body = await readJsonBody(req)
+  try {
+    if (req.url === '/callback') {
+      await onSessionCallback(body)
+      res.writeHead(200)
+      res.end('ok')
+      return
+    }
+    const auth = req.headers.authorization
+    if (!CCC_WEBHOOK_SECRET || auth !== `Bearer ${CCC_WEBHOOK_SECRET}`) {
+      res.writeHead(401)
+      res.end('unauthorized')
+      return
+    }
+    const result = await onReplay(body)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(result))
+  } catch (err) {
+    console.error(`[Bot] ${req.url} error:`, err)
+    res.writeHead(500, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: String(err) }))
   }
 })
 
@@ -220,9 +285,9 @@ callbackServer.listen(BOT_PORT, () => {
 })
 
 // Login
-const token = process.env.DISCORD_BOT_TOKEN
+const token = process.env[TOKEN_ENV]
 if (!token) {
-  console.error('[Bot] DISCORD_BOT_TOKEN not set')
+  console.error(`[Bot] ${TOKEN_ENV} not set`)
   process.exit(1)
 }
 client.login(token)

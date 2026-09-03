@@ -44,6 +44,29 @@ module.exports = {
       time: true,
     },
     {
+      // A second gateway identity: Spotter, the Gymswell feedback bot. Same
+      // script, its own token, and it serves only the triggers whose `bot`
+      // field says "spotter". Two processes on one token would each receive
+      // every event and fire every session twice; two tokens, two names.
+      name: 'c3-discord-bot-spotter',
+      script: 'npx',
+      args: 'tsx discord-bot.ts',
+      cwd: __dirname,
+      env: {
+        NODE_ENV: 'production',
+        CCC_URL: 'http://localhost:8347',
+        BOT_PORT: '8349',
+        C3_DISCORD_BOT: 'spotter',
+        C3_DISCORD_BOT_TOKEN_ENV: 'SPOTTER_DISCORD_BOT_TOKEN',
+      },
+      watch: false,
+      max_memory_restart: '200M',
+      error_file: path.join(logsDir, 'discord-bot-spotter-error.log'),
+      out_file: path.join(logsDir, 'discord-bot-spotter-out.log'),
+      merge_logs: true,
+      time: true,
+    },
+    {
       name: 'c3-slack-poller',
       script: 'npx',
       args: 'tsx slack-poller.ts',

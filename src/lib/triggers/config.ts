@@ -24,6 +24,31 @@ export interface ChannelTrigger {
   permissionMode: string
   model: string
   maxTurns?: number
+  /**
+   * Which Discord gateway process serves this channel. Unset is the default
+   * bot (`c3-discord-bot`). A second process started with C3_DISCORD_BOT set
+   * to this name, and its own token, picks up only the triggers that name it,
+   * so a bot living in another server never double-fires the default one's
+   * channels. See discord-bot.ts and ecosystem.config.cjs.
+   */
+  bot?: string
+  /**
+   * Only messages posted through this webhook fire the trigger. For a channel
+   * where an app posts reports and people talk next to them.
+   */
+  webhookId?: string
+  /**
+   * When true, the bot opens a thread on the triggering message and every
+   * reply (session link, findings, completion) goes into that thread rather
+   * than the channel.
+   */
+  thread?: boolean
+  /**
+   * Bot token the webhook route posts replies with, for a trigger served by a
+   * bot other than the default one. Usually `${SOME_ENV_VAR}`, expanded from
+   * the server's environment like slackBotToken.
+   */
+  discordBotToken?: string
 }
 
 export interface SlackTrigger extends ChannelTrigger {

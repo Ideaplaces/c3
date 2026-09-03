@@ -14,7 +14,10 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { channelId, message, author, messageId } = body
+  const { channelId, message, author, messageId, threadId } = body as {
+    channelId?: string; message?: string; author?: string; messageId?: string; threadId?: string
+    callbackUrl?: string
+  }
 
   if (!channelId || !message) {
     return Response.json({ error: 'Missing channelId or message' }, { status: 400 })
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
     channel: trigger.name,
     channelId,
     messageId: messageId || '',
+    threadId: threadId || '',
     timestamp: new Date().toISOString(),
   })
 
@@ -64,8 +68,10 @@ export async function POST(request: Request) {
 
   console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
 
-  // Set up completion callback: post reply to Discord and/or call external URL
-  const discordBotToken = process.env.DISCORD_BOT_TOKEN
+  // Set up completion callback: post reply to Discord and/or call external URL.
+  // A trigger served by another bot identity carries its own token; the reply
+  // has to come from the bot that is actually a member of that server.
+  const discordBotToken = trigger.discordBotToken || process.env.DISCORD_BOT_TOKEN
   const callbackUrl = body.callbackUrl
 
   const onSessionEnded = (sid: string, reason: string) => {
@@ -108,8 +114,9 @@ export async function POST(request: Request) {
             '```',
           ].join('\n')
 
-      // Reply to the original message
-      fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      // Into the thread the bot opened, or as a reply to the original message
+      const target = threadId || channelId
+      fetch(`https://discord.com/api/v10/channels/${target}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bot ${discordBotToken}`,
@@ -117,19 +124,28 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify({
           content: replyContent,
-          message_reference: { message_id: messageId },
+          ...(threadId ? {} : { message_reference: { message_id: messageId } }),
         }),
       })
         .then(() => console.log(`[Webhook] Discord reply sent for session ${sessionId}`))
         .catch(err => console.error(`[Webhook] Discord reply failed:`, err))
     }
 
-    // Also call external callback if provided
+    // Also call external callback if provided. `replied` tells the bot the
+    // completion notice is already posted, so it does not post a second one.
     if (callbackUrl) {
       fetch(callbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, reason, summary, projectPath: trigger.projectPath }),
+        body: JSON.stringify({
+          sessionId,
+          reason,
+          summary,
+          projectPath: trigger.projectPath,
+          failed: failure.failed,
+          failureReason: failure.failed ? failure.reason : undefined,
+          replied: Boolean(discordBotToken && messageId),
+        }),
       }).catch(err => console.error(`[Webhook] External callback failed:`, err))
     }
   }
