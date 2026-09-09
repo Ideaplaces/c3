@@ -1,3 +1,5 @@
+import { ensureToolPath } from './src/lib/env-path.js'
+ensureToolPath()
 import { createServer } from 'http'
 import { parse } from 'url'
 import fs from 'fs'

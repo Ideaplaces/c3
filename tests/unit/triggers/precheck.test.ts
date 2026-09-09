@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { runPrecheck } from '@/lib/triggers/precheck'
 
 describe('runPrecheck', () => {
@@ -14,10 +14,16 @@ describe('runPrecheck', () => {
     expect(r.reason).toBe('nothing new since 297')
   })
 
-  it('skips when the command itself cannot run', async () => {
+  it('runs anyway when the command itself cannot run: a broken gate is not a quiet day', async () => {
+    // This used to assert proceed === false. That behaviour skipped digby-review
+    // for six mornings (Sep 3 to Sep 8 2026) when gcloud dropped off PATH, so the
+    // protocol changed: only an explicit exit 3 earns a skip.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const r = await runPrecheck('/definitely/not/a/binary', '/tmp')
-    expect(r.proceed).toBe(false)
+    expect(r.proceed).toBe(true)
+    expect(r.broken).toBe(true)
     expect(r.reason).toBeTruthy()
+    spy.mockRestore()
   })
 
   it('runs in the trigger project path with ~ expanded', async () => {

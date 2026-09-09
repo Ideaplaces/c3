@@ -1,3 +1,5 @@
+import { ensureToolPath } from './src/lib/env-path.js'
+ensureToolPath()
 import { Client, GatewayIntentBits, TextChannel, ThreadAutoArchiveDuration, type Message } from 'discord.js'
 import fs from 'fs'
 import path from 'path'
