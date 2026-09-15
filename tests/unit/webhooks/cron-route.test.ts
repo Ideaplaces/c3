@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-const { startSession, loadPromptTemplate, getCronTrigger, runPrecheck, recordSkippedRun } = vi.hoisted(() => ({
+const { startSession, runningSessionWithLabel, loadPromptTemplate, getCronTrigger, runPrecheck, recordSkippedRun } = vi.hoisted(() => ({
   startSession: vi.fn().mockResolvedValue(undefined),
+  runningSessionWithLabel: vi.fn().mockReturnValue(null),
   loadPromptTemplate: vi.fn().mockReturnValue('rendered prompt'),
   getCronTrigger: vi.fn(),
   runPrecheck: vi.fn(),
@@ -11,7 +12,7 @@ vi.mock('@/lib/triggers/precheck', () => ({ runPrecheck }))
 vi.mock('@/lib/usage', () => ({ recordSkippedRun }))
 
 vi.mock('@/lib/sdk/session-manager', () => ({
-  sessionManager: { startSession },
+  sessionManager: { startSession, runningSessionWithLabel },
 }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
 vi.mock('@/lib/triggers/config', () => ({
@@ -35,6 +36,7 @@ function makeRequest(body: Record<string, unknown>) {
 describe('cron webhook route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    runningSessionWithLabel.mockReturnValue(null)
     process.env.CCC_WEBHOOK_SECRET = 'test-secret'
     getCronTrigger.mockReturnValue({
       name: 'assistant-review',
@@ -116,5 +118,25 @@ describe('cron webhook precheck', () => {
     await POST(makeRequest({ triggerName: 'x' }))
     expect(runPrecheck).not.toHaveBeenCalled()
     expect(startSession).toHaveBeenCalledOnce()
+  })
+
+  it('refuses to start while the previous run of the same trigger is still going, before any precheck', async () => {
+    // 2026-09-14: two loops drove one trigger into one checkout at once.
+    runningSessionWithLabel.mockReturnValue('live-session-id')
+    getCronTrigger.mockReturnValue({
+      name: 'tour-help',
+      schedule: '0 6 * * *',
+      prompt: 'tour-help.md',
+      projectPath: '/home/chipdev/ideaplaces-meta/ideaplaces-tour-platform',
+      precheck: 'bash precheck.sh',
+    })
+    const res = await POST(makeRequest({ triggerName: 'tour-help' }))
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body).toMatchObject({ trigger: 'tour-help', status: 'busy', sessionId: 'live-session-id' })
+    expect(runningSessionWithLabel).toHaveBeenCalledWith('cron:tour-help')
+    expect(runPrecheck).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+    expect(recordSkippedRun).toHaveBeenCalledWith('cron:tour-help', expect.any(String), expect.stringContaining('live-session-id'))
   })
 })

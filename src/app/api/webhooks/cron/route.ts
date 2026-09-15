@@ -27,6 +27,19 @@ export async function POST(request: Request) {
 
   console.log(`[Cron Webhook] Trigger "${trigger.name}" fired (schedule: ${schedule})`)
 
+  // One driver per trigger. A run that is still going owns the trigger's
+  // watermarks, its checkout and its branch; a second one started beside it
+  // races all three. Refused before the precheck, which may itself reset a
+  // worktree the running session is using.
+  const label = `cron:${trigger.name}`
+  const running = sessionManager.runningSessionWithLabel(label)
+  if (running) {
+    const reason = `previous run ${running} still going`
+    console.log(`[Cron Webhook] Refused "${trigger.name}": ${reason}`)
+    recordSkippedRun(label, trigger.projectPath, reason)
+    return Response.json({ trigger: trigger.name, status: 'busy', sessionId: running, reason }, { status: 409 })
+  }
+
   if (trigger.precheck) {
     const check = await runPrecheck(trigger.precheck, trigger.projectPath)
     if (!check.proceed) {
@@ -60,7 +73,7 @@ export async function POST(request: Request) {
     prompt,
     permissionMode: trigger.permissionMode || 'bypassPermissions',
     model: trigger.model || DEFAULT_MODEL,
-    label: `cron:${trigger.name}`,
+    label,
   })
 
   console.log(`[Cron Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)

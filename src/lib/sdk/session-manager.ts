@@ -47,6 +47,23 @@ export class SessionManager extends EventEmitter {
   private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
   private lastEventTime = new Map<string, number>()
   private sessionStartTime = new Map<string, number>()
+
+  /**
+   * The id of a live session carrying this label, or null.
+   *
+   * A trigger must not start while its previous run is still going. On
+   * 2026-09-14 two sessions drove the same TourCockpit catch-up loop into the
+   * same checkout and the same watermarks at once, and the only reason nothing
+   * was lost is that someone noticed. The cron webhook asks this before it
+   * runs a precheck or starts anything; a stalled session (no events for the
+   * stall window) counts as gone, because it is about to be ended anyway.
+   */
+  runningSessionWithLabel(label: string): string | null {
+    for (const [sid, active] of this.activeSessions) {
+      if (active.label === label && !this.stalledSessions.has(sid)) return sid
+    }
+    return null
+  }
   private stalledSessions = new Set<string>()
   private watchdogInterval: NodeJS.Timeout
 
