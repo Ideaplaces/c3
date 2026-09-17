@@ -189,45 +189,105 @@ export function formatInvestigationReply(opts: InvestigationReplyOptions): strin
 }
 
 /**
+ * Whether a refused POST is worth sending again. A 5xx is Discord's own edge
+ * failing to reach its backend and is almost always over within a second; a 429
+ * is rate limiting and says when to come back. Everything else (a bad token, a
+ * channel the bot cannot see, content Discord rejects) fails the same way on
+ * every attempt, so retrying it only delays the caller's fallback.
+ */
+export function isRetryableDiscordStatus(status: number): boolean {
+  return status === 429 || status >= 500
+}
+
+/** Attempts per message, so one transient 503 cannot drop a report on the floor. */
+const POST_ATTEMPTS = 3
+
+/** Backoff before attempt 2 and attempt 3, when Discord does not name its own. */
+const RETRY_BACKOFF_MS = [500, 1500]
+
+export interface PostDeps {
+  fetch: typeof fetch
+  sleep: (ms: number) => Promise<void>
+}
+
+const defaultDeps: PostDeps = {
+  fetch: (...args) => globalThis.fetch(...args),
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+}
+
+/**
  * Post one message. Returns its ID, or null when Discord refuses, so callers
  * can fall back rather than assume the report was delivered.
+ *
+ * A transient refusal is retried before giving up. Without that, a single 503
+ * from Discord's edge silently truncated an investigation report: the first
+ * chunk landed, the caller logged a success, and a middle chunk was gone. Seen
+ * in production on 2026-09-17 on the Eli infrastructure mirror.
  */
 export async function postDiscordMessage(
   botToken: string,
   channelId: string,
   content: string,
   replyToMessageId?: string,
+  deps: PostDeps = defaultDeps,
 ): Promise<string | null> {
-  try {
-    const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bot ${botToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content,
-        ...(replyToMessageId
-          ? {
-              message_reference: { message_id: replyToMessageId, fail_if_not_exists: false },
-              allowed_mentions: { parse: [] },
-            }
-          : { allowed_mentions: { parse: [] } }),
-      }),
-    })
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
+  for (let attempt = 1; attempt <= POST_ATTEMPTS; attempt++) {
+    const last = attempt === POST_ATTEMPTS
+    try {
+      const res = await deps.fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bot ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content,
+          ...(replyToMessageId
+            ? {
+                message_reference: { message_id: replyToMessageId, fail_if_not_exists: false },
+                allowed_mentions: { parse: [] },
+              }
+            : { allowed_mentions: { parse: [] } }),
+        }),
+      })
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        const retryable = isRetryableDiscordStatus(res.status)
+        console.error(
+          `[Discord Mirror] POST to ${channelId} failed: HTTP ${res.status}` +
+          ` (attempt ${attempt}/${POST_ATTEMPTS}) ${detail.slice(0, 300)}`,
+        )
+        if (!retryable || last) return null
+        await deps.sleep(retryAfterMs(res, attempt))
+        continue
+      }
+      const data = (await res.json()) as Record<string, unknown>
+      return typeof data.id === 'string' ? data.id : null
+    } catch (err) {
+      // A thrown fetch is a connection that never completed, so the message was
+      // not delivered and sending it again cannot duplicate it.
       console.error(
-        `[Discord Mirror] POST to ${channelId} failed: HTTP ${res.status} ${detail.slice(0, 300)}`,
+        `[Discord Mirror] POST to ${channelId} error (attempt ${attempt}/${POST_ATTEMPTS}):`,
+        err,
       )
-      return null
+      if (last) return null
+      await deps.sleep(RETRY_BACKOFF_MS[attempt - 1])
     }
-    const data = (await res.json()) as Record<string, unknown>
-    return typeof data.id === 'string' ? data.id : null
-  } catch (err) {
-    console.error(`[Discord Mirror] POST to ${channelId} error:`, err)
-    return null
   }
+  return null
+}
+
+/** Discord's own Retry-After when it sends one, otherwise the fixed backoff. */
+function retryAfterMs(
+  res: { headers: { get(name: string): string | null } },
+  attempt: number,
+): number {
+  const header = res.headers?.get('retry-after')
+  const seconds = header === null || header === undefined ? NaN : Number(header)
+  // Only honour a sane value: a malformed or very long wait would stall the
+  // session's report far longer than the fixed backoff.
+  if (Number.isFinite(seconds) && seconds > 0 && seconds <= 10) return Math.ceil(seconds * 1000)
+  return RETRY_BACKOFF_MS[attempt - 1]
 }
 
 /** The seam that lets the chunk sequencing be tested without touching Discord. */
@@ -264,6 +324,14 @@ export async function postDiscordChunked(
     if (i === 0) {
       if (!id) return null
       firstId = id
+    } else if (!id) {
+      // The caller only learns whether the FIRST chunk landed, so it logs a
+      // success for a report that is now missing its middle. Say so here, or a
+      // truncated report leaves no trace at all.
+      console.error(
+        `[Discord Mirror] POST to ${channelId} dropped part ${i + 1}/${chunks.length};` +
+        ` the report in Discord is truncated`,
+      )
     }
     // A dropped continuation chunk must not re-point the chain at the alert.
     if (id) previousId = id

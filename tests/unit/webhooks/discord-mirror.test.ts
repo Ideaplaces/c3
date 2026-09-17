@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   DISCORD_CONTENT_LIMIT,
   chunkDiscordContent,
   formatAlertMirror,
   formatInvestigationReply,
+  isRetryableDiscordStatus,
   postDiscordChunked,
+  postDiscordMessage,
   slackMarkdownToDiscord,
 } from '../../../src/lib/webhooks/discord-mirror'
 
@@ -151,6 +153,160 @@ describe('postDiscordChunked', () => {
     await postDiscordChunked('tok', 'chan', longReport, 'alert-msg', poster)
     expect(calls[1].replyTo).toBe('m1')
     expect(calls[2].replyTo).toBe('m1')
+  })
+
+  it('logs a dropped continuation chunk, which the return value cannot express', async () => {
+    const { poster } = recordingPoster(['m1', null as unknown as string, 'm3', 'm4', 'm5'])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // The first chunk landed, so the caller sees a success and logs one.
+      expect(await postDiscordChunked('tok', 'chan', longReport, 'alert-msg', poster)).toBe('m1')
+      const message = logged.mock.calls.map(args => args.join(' ')).join('\n')
+      expect(message).toContain('dropped part 2/')
+      expect(message).toContain('truncated')
+    } finally {
+      logged.mockRestore()
+    }
+  })
+})
+
+describe('isRetryableDiscordStatus', () => {
+  it('retries what Discord can recover from on its own', () => {
+    expect(isRetryableDiscordStatus(503)).toBe(true)
+    expect(isRetryableDiscordStatus(500)).toBe(true)
+    expect(isRetryableDiscordStatus(502)).toBe(true)
+    expect(isRetryableDiscordStatus(429)).toBe(true)
+  })
+
+  it('does not retry a request Discord will refuse every time', () => {
+    expect(isRetryableDiscordStatus(401)).toBe(false)
+    expect(isRetryableDiscordStatus(403)).toBe(false)
+    expect(isRetryableDiscordStatus(404)).toBe(false)
+    expect(isRetryableDiscordStatus(400)).toBe(false)
+  })
+})
+
+describe('postDiscordMessage retries', () => {
+  // The production 503: Discord's edge could not reach its own backend.
+  const upstream503 = {
+    ok: false,
+    status: 503,
+    headers: { get: () => null },
+    text: async () =>
+      'upstream connect error or disconnect/reset before headers.' +
+      ' retried and the latest reset reason: remote connection failure',
+  }
+  const created = (id: string) => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ id }),
+  })
+
+  function deps(responses: Array<unknown | Error>) {
+    const slept: number[] = []
+    let n = 0
+    const fetchMock = vi.fn(async () => {
+      const next = responses[n++]
+      if (next instanceof Error) throw next
+      return next as Response
+    })
+    return {
+      slept,
+      fetchMock,
+      deps: {
+        fetch: fetchMock as unknown as typeof fetch,
+        sleep: async (ms: number) => {
+          slept.push(ms)
+        },
+      },
+    }
+  }
+
+  it('delivers the message when a transient 503 is followed by a success', async () => {
+    const { deps: d, fetchMock, slept } = deps([upstream503, created('m9')])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report part 2', 'm1', d)).toBe('m9')
+    } finally {
+      logged.mockRestore()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(slept).toEqual([500])
+  })
+
+  it('gives up after the attempt budget so the caller can fall back', async () => {
+    const { deps: d, fetchMock } = deps([upstream503, upstream503, upstream503])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report', undefined, d)).toBeNull()
+    } finally {
+      logged.mockRestore()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry a refusal that will not change', async () => {
+    const forbidden = {
+      ok: false,
+      status: 403,
+      headers: { get: () => null },
+      text: async () => 'Missing Access',
+    }
+    const { deps: d, fetchMock } = deps([forbidden, created('never')])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report', undefined, d)).toBeNull()
+    } finally {
+      logged.mockRestore()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits the Retry-After Discord names on a 429', async () => {
+    const limited = {
+      ok: false,
+      status: 429,
+      headers: { get: (n: string) => (n === 'retry-after' ? '2' : null) },
+      text: async () => 'rate limited',
+    }
+    const { deps: d, slept } = deps([limited, created('m4')])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report', undefined, d)).toBe('m4')
+    } finally {
+      logged.mockRestore()
+    }
+    expect(slept).toEqual([2000])
+  })
+
+  it('ignores an absurd Retry-After rather than stalling the report', async () => {
+    const limited = {
+      ok: false,
+      status: 429,
+      headers: { get: (n: string) => (n === 'retry-after' ? '3600' : null) },
+      text: async () => 'rate limited',
+    }
+    const { deps: d, slept } = deps([limited, created('m4')])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report', undefined, d)).toBe('m4')
+    } finally {
+      logged.mockRestore()
+    }
+    expect(slept).toEqual([500])
+  })
+
+  it('retries a connection that never completed', async () => {
+    const { deps: d, fetchMock, slept } = deps([new Error('ECONNRESET'), created('m7')])
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await postDiscordMessage('tok', 'chan', 'report', undefined, d)).toBe('m7')
+    } finally {
+      logged.mockRestore()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(slept).toEqual([500])
   })
 })
 
