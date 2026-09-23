@@ -8,7 +8,7 @@ import { getSessionJSONLPath, getSessionLastActivityMs } from '@/lib/claude-sess
 import { readSessionJSONL } from '@/lib/claude-sessions/reader'
 import { basename } from 'path'
 import { DEFAULT_MODEL } from '@/lib/models'
-import { recordSessionUsage, startUsageTracking, trackAssistantUsage } from '@/lib/usage'
+import { recordSessionEndedWithoutResult, recordSessionUsage, startUsageTracking, trackAssistantUsage } from '@/lib/usage'
 
 interface ActiveSession {
   id: string
@@ -17,6 +17,8 @@ interface ActiveSession {
   projectPath: string
   label: string
   model: string
+  /** This session's own cap, when its trigger set one; else MAX_SESSION_DURATION_MS. */
+  maxDurationMs?: number
 }
 
 interface StartSessionParams {
@@ -27,6 +29,8 @@ interface StartSessionParams {
   sessionId?: string
   /** Who started it, for the usage ledger: `cron:<trigger>`, `slack:<trigger>`, `discord:<trigger>`, `web`. */
   label?: string
+  /** The trigger's own duration cap in ms; unset means the process default. */
+  maxDurationMs?: number
 }
 
 // Classic stall: the SDK generator stops emitting events for this long → abort
@@ -103,7 +107,7 @@ export class SessionManager extends EventEmitter {
         jsonlIdleMs !== null &&
         jsonlIdleMs > JSONL_IDLE_RECOVERY_MS &&
         eventAgeMs > JSONL_IDLE_RECOVERY_MS
-      const isOverMaxDuration = sessionAgeMs > MAX_SESSION_DURATION_MS
+      const isOverMaxDuration = sessionAgeMs > (active.maxDurationMs ?? MAX_SESSION_DURATION_MS)
 
       if (!isClassicStall && !isHungIterator && !isOverMaxDuration) continue
 
@@ -120,6 +124,15 @@ export class SessionManager extends EventEmitter {
           `sessionAge=${Math.round(sessionAgeMs / 1000)}s`,
       )
       this.stalledSessions.add(sid)
+      // A run ended here never sends a result, so it would leave no ledger
+      // line: the 30-minute run of 2026-09-23 posted, opened its pull request
+      // and vanished from the rollup. Write what was counted so far.
+      void recordSessionEndedWithoutResult(sid, reason, {
+        label: active.label,
+        projectPath: active.projectPath,
+        model: active.model,
+        durationMs: sessionAgeMs,
+      })
       try {
         active.abortController.abort()
       } catch (err) {
@@ -223,6 +236,7 @@ export class SessionManager extends EventEmitter {
       projectPath,
       label,
       model: resolvedModel,
+      ...(params.maxDurationMs ? { maxDurationMs: params.maxDurationMs } : {}),
     })
     this.sessionStartTime.set(sessionId, Date.now())
     startUsageTracking(sessionId, label)
@@ -398,7 +412,17 @@ export class SessionManager extends EventEmitter {
       this.emit('session_ended', sessionId, 'completed')
     } catch (error) {
       const wasStalled = this.stalledSessions.has(sessionId)
+      const active = this.activeSessions.get(sessionId)
+      const startedAt = this.sessionStartTime.get(sessionId)
       this.cleanupSessionState(sessionId)
+      // A generator that threw sent no result either; the self-heal path may
+      // already have written the line, in which case this is a no-op.
+      void recordSessionEndedWithoutResult(sessionId, wasStalled ? 'stalled' : 'error', {
+        label: active?.label ?? 'unlabelled',
+        projectPath: active?.projectPath ?? '',
+        model: active?.model ?? '',
+        durationMs: startedAt ? Date.now() - startedAt : 0,
+      })
       const errorMessage = wasStalled
         ? 'stalled: SDK generator aborted after no events within timeout'
         : error instanceof Error ? error.message : 'Unknown error'

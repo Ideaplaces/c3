@@ -110,6 +110,46 @@ export async function recordSessionUsage(
   }
 }
 
+/**
+ * A run that ended without a result message: ended by the session manager
+ * (max-duration-exceeded, stalled) or by a generator that threw. The SDK never
+ * sends its totals for such a run, so this writes what the live tracker
+ * counted: turns, context and output tokens. The cache split and the cost are
+ * not known and are written as zero. No-op when the run already has its line.
+ */
+export async function recordSessionEndedWithoutResult(
+  sessionId: string,
+  reason: string,
+  meta: { label: string; projectPath: string; model: string; durationMs: number },
+): Promise<void> {
+  const t = tracked.get(sessionId)
+  if (!t) return
+  tracked.delete(sessionId)
+  try {
+    const record = {
+      ts: new Date().toISOString(),
+      sessionId,
+      label: meta.label,
+      projectPath: meta.projectPath,
+      model: meta.model,
+      status: `ended: ${reason}`.slice(0, 200),
+      turns: t.state.turns,
+      durationMs: Math.max(0, Math.round(meta.durationMs)),
+      inputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: t.state.outputTokens,
+      contextTokens: t.state.contextTokens,
+      costUsd: 0,
+    }
+    appendUsage(usageLedgerPath(), record)
+    console.log(`[Usage] ${record.label}: ${record.status}, ${record.turns} turns, ${record.contextTokens} context tokens`)
+    if (t.state.alertedAt.length > 0) await post(formatRunningClose(record.label, record, t.state.alertedAt.length))
+  } catch (err) {
+    console.error('[Usage] could not record the ended session:', err)
+  }
+}
+
 /** A precheck said there was nothing to do: one zero-token line, so the rollup shows the quiet days too. */
 export function recordSkippedRun(label: string, projectPath: string, reason: string): void {
   try {

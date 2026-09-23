@@ -163,6 +163,7 @@ export async function POST(request: Request) {
     permissionMode: trigger.permissionMode || 'bypassPermissions',
     model: trigger.model || DEFAULT_MODEL,
     label: `slack:${trigger.name}`,
+    maxDurationMs: trigger.maxDurationMs,
   })
 
   console.log(`[Slack Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)

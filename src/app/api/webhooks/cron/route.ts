@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     permissionMode: trigger.permissionMode || 'bypassPermissions',
     model: trigger.model || DEFAULT_MODEL,
     label,
+    maxDurationMs: trigger.maxDurationMs,
   })
 
   console.log(`[Cron Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
