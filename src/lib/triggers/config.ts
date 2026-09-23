@@ -12,6 +12,14 @@ export interface ChannelTrigger {
    */
   precheck?: string
   /**
+   * How long one run of this trigger may take, in ms, before C3 ends it as
+   * max-duration-exceeded. Unset means the process default (C3_MAX_SESSION_DURATION_MS,
+   * 30 minutes). A reviewer that opens a pull request and then waits for CI
+   * needs more: faro-review was ended at 30:27 on 2026-09-23 while writing the
+   * follow-up that would have merged, and the ledger never heard of the run.
+   */
+  maxDurationMs?: number
+  /**
    * Minimum gap in ms between two sessions on this channel. Defaults to the
    * poller's 5 minutes, which folds an alert burst into one investigation.
    * Set 0 on a channel where every message is its own case (NPS scores,
@@ -100,6 +108,14 @@ export interface CronTrigger {
    * to cost a full session just to discover there was nothing to review.
    */
   precheck?: string
+  /**
+   * How long one run of this trigger may take, in ms, before C3 ends it as
+   * max-duration-exceeded. Unset means the process default (C3_MAX_SESSION_DURATION_MS,
+   * 30 minutes). A reviewer that opens a pull request and then waits for CI
+   * needs more: faro-review was ended at 30:27 on 2026-09-23 while writing the
+   * follow-up that would have merged, and the ledger never heard of the run.
+   */
+  maxDurationMs?: number
 }
 
 interface TriggersConfig {
