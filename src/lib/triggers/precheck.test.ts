@@ -30,4 +30,22 @@ describe('runPrecheck protocol', () => {
     expect(r.broken).toBe(true)
     spy.mockRestore()
   })
+
+  it('a gate killed on the timeout says it timed out, not exit -1', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    process.env.C3_PRECHECK_TIMEOUT_MS = '300'
+    vi.resetModules()
+    const { runPrecheck: withShortTimeout } = await import('./precheck.js')
+    const r = await withShortTimeout('echo looking at origin; sleep 5', '/tmp')
+    delete process.env.C3_PRECHECK_TIMEOUT_MS
+    expect(r.proceed).toBe(true)
+    expect(r.broken).toBe(true)
+    expect(r.timedOut).toBe(true)
+    // What the old message lost: how long it ran, the signal, and the last
+    // thing the gate printed, which is what names the command that hung.
+    expect(r.reason).toMatch(/^timed out after \d+s \(SIGTERM\), last output: looking at origin$/)
+    expect(spy.mock.calls[0][0]).toContain('timed out after')
+    expect(spy.mock.calls[0][0]).not.toContain('exit -1')
+    spy.mockRestore()
+  })
 })
