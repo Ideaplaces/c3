@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 const { startSession, runningSessionWithLabel, loadPromptTemplate, getCronTrigger, runPrecheck, recordSkippedRun } = vi.hoisted(() => ({
   startSession: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +34,10 @@ function makeRequest(body: Record<string, unknown>) {
 }
 
 describe('cron webhook route', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     runningSessionWithLabel.mockReturnValue(null)
@@ -48,7 +52,8 @@ describe('cron webhook route', () => {
     })
   })
 
-  it('substitutes sessionId and a matching resumeCommand into the prompt template', async () => {
+  it('substitutes sessionId, its browser sessionUrl and a matching resumeCommand into the prompt template', async () => {
+    vi.stubEnv('C3_BASE_URL', 'https://c3-chip.ideaplaces.com/')
     const res = await POST(makeRequest({ triggerName: 'assistant-review' }))
     expect(res.status).toBe(200)
 
@@ -59,6 +64,7 @@ describe('cron webhook route', () => {
     expect(variables.resumeCommand).toBe(
       `cd /home/chipdev/mentorly-meta && claude --resume ${variables.sessionId} --dangerously-skip-permissions`
     )
+    expect(variables.sessionUrl).toBe(`https://c3-chip.ideaplaces.com/sessions/${variables.sessionId}`)
 
     expect(startSession).toHaveBeenCalledWith(
       expect.objectContaining({
