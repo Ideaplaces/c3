@@ -146,6 +146,7 @@ function resolveConfigDir(): string {
 const CONFIG_DIR = resolveConfigDir()
 const TRIGGERS_PATH = path.join(CONFIG_DIR, 'triggers.json')
 const PROMPTS_DIR = path.join(CONFIG_DIR, 'prompts')
+export const SHARED_PROMPT = '_all-agents.md'
 
 let cachedConfig: TriggersConfig | null = null
 let cachedMtime: number = 0
@@ -246,6 +247,13 @@ export function loadPromptTemplate(
     : path.join(PROMPTS_DIR, templatePath)
 
   let prompt = fs.readFileSync(fullPath, 'utf-8')
+  // Rules every agent of this config follows (how to report, what to ask
+  // for), kept in one file instead of copied into each prompt. Appended last,
+  // after the trigger's own instructions, and it wins where they disagree.
+  const shared = path.join(PROMPTS_DIR, SHARED_PROMPT)
+  if (fullPath !== shared && fs.existsSync(shared)) {
+    prompt = `${prompt.trimEnd()}\n\n${fs.readFileSync(shared, 'utf-8')}`
+  }
   for (const [key, value] of Object.entries(variables)) {
     prompt = prompt.replaceAll(`{{${key}}}`, value)
   }
