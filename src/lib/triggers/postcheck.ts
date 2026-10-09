@@ -1,4 +1,6 @@
 import { runPrecheck } from '@/lib/triggers/precheck'
+import { USAGE_CHANNEL_ID } from '@/lib/usage'
+import { postDiscordMessage } from '@/lib/webhooks/discord-mirror'
 import { detectSessionFailure, type BufferedSessionEvent } from '@/lib/webhooks/failure-detector'
 
 /**
@@ -35,12 +37,46 @@ export function postcheckEnv(ending: CronRunEnding): Record<string, string> {
   }
 }
 
-export async function runPostcheck(command: string, cwd: string, ending: CronRunEnding): Promise<void> {
+/**
+ * A postcheck that cannot run (an expired az login, a Slack error, a crash) is
+ * the one failure it cannot report itself, so C3 says so in the channel its own
+ * usage alerts go to. A log line alone is how digby-review's broken gate went
+ * unseen for six days in September.
+ */
+export function formatPostcheckFailure(
+  label: string,
+  exitCode: number,
+  reason: string,
+  sessionUrl: string,
+  timedOut = false,
+): string {
+  // The reason is the command's last output line; keep the post under Discord's 2000 characters.
+  const why = (reason || 'no output').slice(0, 500)
+  const how = timedOut ? 'timed out' : `exit ${exitCode}`
+  return (
+    `**C3 postcheck failed** \`${label}\`: ${how}, ${why}. ` +
+    `If the run itself died, nothing said so. Session: ${sessionUrl}`
+  )
+}
+
+export async function runPostcheck(
+  label: string,
+  command: string,
+  cwd: string,
+  ending: CronRunEnding,
+): Promise<void> {
   const result = await runPrecheck(command, cwd, postcheckEnv(ending))
   if (result.exitCode !== 0) {
     console.error(
       `[Postcheck] "${command}" exited ${result.exitCode} after session ${ending.sessionId}: ${result.reason}`,
     )
+    const text = formatPostcheckFailure(label, result.exitCode, result.reason, ending.sessionUrl, result.timedOut)
+    const token = process.env.DISCORD_BOT_TOKEN
+    if (!token) {
+      console.warn('[Postcheck] alert not posted, DISCORD_BOT_TOKEN is unset:', text)
+      return
+    }
+    await postDiscordMessage(token, USAGE_CHANNEL_ID, text)
     return
   }
   console.log(`[Postcheck] session ${ending.sessionId}: ${result.reason || 'ok'}`)
