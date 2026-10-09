@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   })
 
   const stopWatching = trigger.postcheck
-    ? watchForEnding(trigger.postcheck, trigger.projectPath, sessionId, sessionUrl)
+    ? watchForEnding(label, trigger.postcheck, trigger.projectPath, sessionId, sessionUrl)
     : () => {}
 
   try {
@@ -97,14 +97,20 @@ export async function POST(request: Request) {
 
 // Registered before the session starts, so a run that dies in its first seconds
 // is still seen. Returns the unsubscribe for a session that never started.
-function watchForEnding(command: string, projectPath: string, sessionId: string, sessionUrl: string): () => void {
+function watchForEnding(
+  label: string,
+  command: string,
+  projectPath: string,
+  sessionId: string,
+  sessionUrl: string,
+): () => void {
   const startedAt = new Date().toISOString()
   const onEnded = (sid: string, reason: string) => {
     if (sid !== sessionId) return
     sessionManager.removeListener('session_ended', onEnded)
     const events = sessionManager.getBufferedEvents(sessionId)
-    // Fire-and-forget: nothing waits on the postcheck, so its own failure is only logged.
-    runPostcheck(command, projectPath, { sessionId, sessionUrl, startedAt, endReason: reason, events }).catch(err =>
+    // Fire-and-forget: nothing waits on the postcheck. A failing postcheck alerts itself; only a throw lands here.
+    runPostcheck(label, command, projectPath, { sessionId, sessionUrl, startedAt, endReason: reason, events }).catch(err =>
       console.error(`[Cron Webhook] Postcheck error for ${sessionId}:`, err),
     )
   }
