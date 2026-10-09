@@ -9,7 +9,7 @@ import { detectSessionFailure, type BufferedSessionEvent } from '@/lib/webhooks/
  * the last step, so a run cut off before that step posts nothing, and a day it
  * died reads exactly like a quiet day. On 2026-10-08 iris-review died eight
  * minutes in on "You've hit your session limit" with two wrong answers in its
- * bundle, and nobody knew until the next morning's run said so.
+ * bundle, and nobody knew until it was found by hand that evening.
  *
  * A trigger with a `postcheck` gets that command run once its session ends,
  * however it ended, with what C3 knows about the ending in the environment. The
