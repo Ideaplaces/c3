@@ -1,0 +1,47 @@
+import { runPrecheck } from '@/lib/triggers/precheck'
+import { detectSessionFailure, type BufferedSessionEvent } from '@/lib/webhooks/failure-detector'
+
+/**
+ * The cron half of "a silent agent crash must never go unseen".
+ *
+ * Slack and Discord sessions get a failure notice from C3 when they die, because
+ * C3 owns their reply. A cron session owns its own report: the prompt posts it as
+ * the last step, so a run cut off before that step posts nothing, and a day it
+ * died reads exactly like a quiet day. On 2026-10-08 iris-review died eight
+ * minutes in on "You've hit your session limit" with two wrong answers in its
+ * bundle, and nobody knew until the next morning's run said so.
+ *
+ * A trigger with a `postcheck` gets that command run once its session ends,
+ * however it ended, with what C3 knows about the ending in the environment. The
+ * command decides what a missing report means for its trigger and where to say
+ * so; C3 stays out of each trigger's channel and token.
+ */
+export interface CronRunEnding {
+  sessionId: string
+  sessionUrl: string
+  startedAt: string
+  endReason: string
+  events: BufferedSessionEvent[]
+}
+
+export function postcheckEnv(ending: CronRunEnding): Record<string, string> {
+  const failure = detectSessionFailure(ending.events, ending.endReason)
+  return {
+    C3_SESSION_ID: ending.sessionId,
+    C3_SESSION_URL: ending.sessionUrl,
+    C3_RUN_STARTED_AT: ending.startedAt,
+    C3_END_REASON: ending.endReason,
+    C3_FAILURE: failure.failed ? failure.reason : '',
+  }
+}
+
+export async function runPostcheck(command: string, cwd: string, ending: CronRunEnding): Promise<void> {
+  const result = await runPrecheck(command, cwd, postcheckEnv(ending))
+  if (result.exitCode !== 0) {
+    console.error(
+      `[Postcheck] "${command}" exited ${result.exitCode} after session ${ending.sessionId}: ${result.reason}`,
+    )
+    return
+  }
+  console.log(`[Postcheck] session ${ending.sessionId}: ${result.reason || 'ok'}`)
+}
