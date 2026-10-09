@@ -3,6 +3,7 @@ import { sessionManager } from '@/lib/sdk/session-manager'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getCronTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { runPrecheck } from '@/lib/triggers/precheck'
+import { runPostcheck } from '@/lib/triggers/postcheck'
 import { recordSkippedRun } from '@/lib/usage'
 
 export async function POST(request: Request) {
@@ -70,17 +71,43 @@ export async function POST(request: Request) {
     resumeCommand,
   })
 
-  await sessionManager.startSession({
-    sessionId,
-    projectPath: trigger.projectPath,
-    prompt,
-    permissionMode: trigger.permissionMode || 'bypassPermissions',
-    model: trigger.model || DEFAULT_MODEL,
-    label,
-    maxDurationMs: trigger.maxDurationMs,
-  })
+  const stopWatching = trigger.postcheck
+    ? watchForEnding(trigger.postcheck, trigger.projectPath, sessionId, sessionUrl)
+    : () => {}
+
+  try {
+    await sessionManager.startSession({
+      sessionId,
+      projectPath: trigger.projectPath,
+      prompt,
+      permissionMode: trigger.permissionMode || 'bypassPermissions',
+      model: trigger.model || DEFAULT_MODEL,
+      label,
+      maxDurationMs: trigger.maxDurationMs,
+    })
+  } catch (err) {
+    stopWatching()
+    throw err
+  }
 
   console.log(`[Cron Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
 
   return Response.json({ sessionId, trigger: trigger.name, status: 'started' })
+}
+
+// Registered before the session starts, so a run that dies in its first seconds
+// is still seen. Returns the unsubscribe for a session that never started.
+function watchForEnding(command: string, projectPath: string, sessionId: string, sessionUrl: string): () => void {
+  const startedAt = new Date().toISOString()
+  const onEnded = (sid: string, reason: string) => {
+    if (sid !== sessionId) return
+    sessionManager.removeListener('session_ended', onEnded)
+    const events = sessionManager.getBufferedEvents(sessionId)
+    // Fire-and-forget: nothing waits on the postcheck, so its own failure is only logged.
+    runPostcheck(command, projectPath, { sessionId, sessionUrl, startedAt, endReason: reason, events }).catch(err =>
+      console.error(`[Cron Webhook] Postcheck error for ${sessionId}:`, err),
+    )
+  }
+  sessionManager.on('session_ended', onEnded)
+  return () => sessionManager.removeListener('session_ended', onEnded)
 }

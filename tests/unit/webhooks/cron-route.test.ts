@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-const { startSession, runningSessionWithLabel, loadPromptTemplate, getCronTrigger, runPrecheck, recordSkippedRun } = vi.hoisted(() => ({
+const { startSession, runningSessionWithLabel, loadPromptTemplate, getCronTrigger, runPrecheck, recordSkippedRun, sessionEvents, bufferedEvents } = vi.hoisted(() => ({
+  sessionEvents: new (require('events').EventEmitter)(),
+  bufferedEvents: { current: [] as unknown[] },
   startSession: vi.fn().mockResolvedValue(undefined),
   runningSessionWithLabel: vi.fn().mockReturnValue(null),
   loadPromptTemplate: vi.fn().mockReturnValue('rendered prompt'),
@@ -12,7 +14,13 @@ vi.mock('@/lib/triggers/precheck', () => ({ runPrecheck }))
 vi.mock('@/lib/usage', () => ({ recordSkippedRun }))
 
 vi.mock('@/lib/sdk/session-manager', () => ({
-  sessionManager: { startSession, runningSessionWithLabel },
+  sessionManager: {
+    startSession,
+    runningSessionWithLabel,
+    on: (e: string, fn: (...a: unknown[]) => void) => sessionEvents.on(e, fn),
+    removeListener: (e: string, fn: (...a: unknown[]) => void) => sessionEvents.removeListener(e, fn),
+    getBufferedEvents: () => bufferedEvents.current,
+  },
 }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
 vi.mock('@/lib/triggers/config', () => ({
@@ -144,5 +152,68 @@ describe('cron webhook precheck', () => {
     expect(runPrecheck).not.toHaveBeenCalled()
     expect(startSession).not.toHaveBeenCalled()
     expect(recordSkippedRun).toHaveBeenCalledWith('cron:tour-help', expect.any(String), expect.stringContaining('live-session-id'))
+  })
+})
+
+describe('cron webhook postcheck', () => {
+  const trigger = {
+    name: 'iris-review',
+    schedule: '35 9 * * *',
+    prompt: 'iris-review.md',
+    projectPath: '/home/chipdev/mentorly-meta',
+    permissionMode: 'bypassPermissions',
+    model: 'm',
+    postcheck: 'python3 watchdog.py',
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionEvents.removeAllListeners()
+    runningSessionWithLabel.mockReturnValue(null)
+    runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: 'posted' })
+    process.env.CCC_WEBHOOK_SECRET = 'test-secret'
+    getCronTrigger.mockReturnValue(trigger)
+  })
+
+  it('runs the postcheck once, when its own session ends, with how it ended', async () => {
+    // 2026-10-08: iris-review died on the session limit and posted nothing.
+    bufferedEvents.current = [
+      { sessionId: 's', message: { type: 'assistant', error: 'rate_limit', message: { content: "You've hit your session limit" } } },
+    ]
+    const { sessionId } = await (await POST(makeRequest({ triggerName: 'iris-review' }))).json()
+    expect(runPrecheck).not.toHaveBeenCalled()
+
+    sessionEvents.emit('session_ended', 'some-other-session', 'completed')
+    expect(runPrecheck).not.toHaveBeenCalled()
+
+    sessionEvents.emit('session_ended', sessionId, 'completed')
+    sessionEvents.emit('session_ended', sessionId, 'completed')
+    expect(runPrecheck).toHaveBeenCalledOnce()
+    const [command, cwd, env] = runPrecheck.mock.calls[0]
+    expect(command).toBe('python3 watchdog.py')
+    expect(cwd).toBe('/home/chipdev/mentorly-meta')
+    expect(env.C3_SESSION_ID).toBe(sessionId)
+    expect(env.C3_END_REASON).toBe('completed')
+    expect(env.C3_FAILURE).toBe("rate_limit: You've hit your session limit")
+    expect(env.C3_SESSION_URL).toMatch(new RegExp(`/sessions/${sessionId}$`))
+    expect(Date.parse(env.C3_RUN_STARTED_AT)).not.toBeNaN()
+  })
+
+  it('passes an empty C3_FAILURE for a run that ended normally', async () => {
+    bufferedEvents.current = [{ sessionId: 's', message: { type: 'assistant', message: { content: 'Posted the review.' } } }]
+    const { sessionId } = await (await POST(makeRequest({ triggerName: 'iris-review' }))).json()
+    sessionEvents.emit('session_ended', sessionId, 'completed')
+    expect(runPrecheck.mock.calls[0][2].C3_FAILURE).toBe('')
+  })
+
+  it('does not watch a trigger without a postcheck, nor a session that failed to start', async () => {
+    getCronTrigger.mockReturnValue({ ...trigger, postcheck: undefined })
+    await POST(makeRequest({ triggerName: 'iris-review' }))
+    expect(sessionEvents.listenerCount('session_ended')).toBe(0)
+
+    getCronTrigger.mockReturnValue(trigger)
+    startSession.mockRejectedValueOnce(new Error('spawn failed'))
+    await expect(POST(makeRequest({ triggerName: 'iris-review' }))).rejects.toThrow('spawn failed')
+    expect(sessionEvents.listenerCount('session_ended')).toBe(0)
   })
 })

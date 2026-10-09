@@ -116,6 +116,15 @@ export interface CronTrigger {
    * follow-up that would have merged, and the ledger never heard of the run.
    */
   maxDurationMs?: number
+  /**
+   * Shell command run in projectPath once the session ends, however it ended,
+   * with C3_SESSION_ID, C3_SESSION_URL, C3_RUN_STARTED_AT, C3_END_REASON and
+   * C3_FAILURE (empty when the run looks healthy) in its environment. A cron
+   * prompt posts its own report as its last step, so a run cut off before it
+   * posts nothing; this is where the trigger says so instead. See
+   * src/lib/triggers/postcheck.ts.
+   */
+  postcheck?: string
 }
 
 interface TriggersConfig {
