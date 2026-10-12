@@ -99,7 +99,9 @@ export function NewSessionDialog({ open, onClose, onSubmit }: NewSessionDialogPr
           value={model}
           onChange={(e) => setModel(e.target.value)}
         >
-          <option value="">Default (Opus 5, 1M context)</option>
+          <option value="">Default (Opus 5.5, 1M context)</option>
+          <option value="claude-opus-5-5[1m]">Claude Opus 5.5 (1M context)</option>
+          <option value="claude-opus-5-5">Claude Opus 5.5</option>
           <option value="claude-opus-5[1m]">Claude Opus 5 (1M context)</option>
           <option value="claude-opus-5">Claude Opus 5</option>
           <option value="claude-fable-5">Claude Fable 5</option>
