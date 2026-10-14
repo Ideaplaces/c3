@@ -269,12 +269,16 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--engines", default="")
-    ap.add_argument("--wave", default=time.strftime("%Y-%m-%d"))
+    ap.add_argument("--wave", default=None, help="defaults to today in the config's timezone (America/Toronto)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--runs", type=int, default=0, help="exact runs per prompt; 0 is early stopping")
     ap.add_argument("--no-upload", action="store_true")
     args = ap.parse_args(argv)
     cfg = load(args.config)
+    if not args.wave:  # the machine runs on UTC, which is tomorrow after 8 PM Eastern
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+        import datetime as _dt  # noqa: PLC0415
+        args.wave = _dt.datetime.now(ZoneInfo(cfg.get("timezone", "America/Toronto"))).date().isoformat()
     # An engine with "default": false runs only when asked for by name (a comparison surface).
     engines = [e for e in args.engines.split(",") if e] or [n for n, e in cfg["engines"].items() if e.get("default", True)]
     return run(cfg, engines, args.wave, args.limit, args.runs, args.no_upload)
