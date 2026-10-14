@@ -183,7 +183,8 @@ def test_continuous_did_counts_a_query_missing_from_a_window_as_zero():
 def test_continuous_did_needs_two_targets_and_reads_volume_before_the_change():
     before, after, targets = _windows(2.0, 1.0)
     one = {sorted(targets)[0]}
-    assert stats.continuous_did(before, after, one, seed=1)["readable"] is False  # one targeted query is no group
+    rich = {q: (500 if q in one else v) for q, v in before.items()}  # volume is not what stops it
+    assert stats.continuous_did(rich, after, one, seed=1)["readable"] is False  # one targeted query is no group
     thin_before = {q: (5 if q in targets else v) for q, v in before.items()}
     rich_after = {q: (500 if q in targets else v) for q, v in after.items()}
     d = stats.continuous_did(thin_before, rich_after, targets, seed=1, min_target_volume=100)
