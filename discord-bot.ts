@@ -1,6 +1,6 @@
 import { ensureToolPath } from './src/lib/env-path.js'
 ensureToolPath()
-import { Client, GatewayIntentBits, TextChannel, ThreadAutoArchiveDuration, type Message } from 'discord.js'
+import { Client, GatewayIntentBits, TextChannel, ThreadAutoArchiveDuration, type Message, type ThreadChannel } from 'discord.js'
 import fs from 'fs'
 import path from 'path'
 import http from 'http'
@@ -14,6 +14,10 @@ import {
   extractDiscordText,
   threadNameFor,
   formatSessionResult,
+  routeMessage,
+  composeThreadText,
+  threadBusy,
+  BUSY_NOTE,
   type BotChannelTrigger,
   type DiscordMessageLike,
 } from './src/lib/discord-bot/logic.js'
@@ -97,6 +101,7 @@ interface PendingSession {
   channelId: string
   messageId: string
   threadId?: string
+  startedAt: number
 }
 const pendingSessions = new Map<string, PendingSession>()
 
@@ -181,6 +186,15 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
     }
   }
 
+  return startSession(msg, trigger, text, subject.id, threadId, true)
+}
+
+/**
+ * Hand one message to the server and remember where the answer goes. `msg` is
+ * what gets the eyes or the cross; `subjectId` and `threadId` are where the
+ * answer is posted.
+ */
+async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean) {
   try {
     const response = await fetch(`${CCC_URL}/api/webhooks/discord`, {
       method: 'POST',
@@ -189,10 +203,10 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
         'Authorization': `Bearer ${CCC_WEBHOOK_SECRET}`,
       },
       body: JSON.stringify({
-        channelId: msg.channelId,
+        channelId: trigger.channelId,
         message: text,
         author: msg.author.username,
-        messageId: subject.id,
+        messageId: subjectId,
         threadId,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),
@@ -201,9 +215,9 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
     const data = await response.json() as { sessionId?: string; trigger?: string; error?: string }
 
     if (response.ok && data.sessionId) {
-      pendingSessions.set(data.sessionId, { channelId: msg.channelId, messageId: subject.id, threadId })
+      pendingSessions.set(data.sessionId, { channelId: trigger.channelId, messageId: subjectId, threadId, startedAt: Date.now() })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
-      if (threadId) {
+      if (threadId && announce) {
         const thread = await client.channels.fetch(threadId).catch(() => null)
         if (thread?.isThread()) {
           await thread.send(`On it. Session: ${BASE_URL}/sessions/${data.sessionId}`).catch(() => {})
@@ -221,11 +235,59 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   }
 }
 
+// Threads whose follow-up is between "reply received" and "session registered":
+// set before the first await, so two quick replies cannot both start a session.
+const startingThreads = new Set<string>()
+
+/**
+ * A person replying inside a thread under a thread trigger: the same agent answers
+ * in the same thread, with the conversation so far, instead of the reply being
+ * ignored because a thread is not the trigger's channel. One session per thread at
+ * a time: a second one could not see the first one's answer.
+ */
+async function handleThreadReply(msg: Message, trigger: BotChannelTrigger) {
+  if (!msg.channel.isThread()) return
+  const thread = msg.channel
+  if (startingThreads.has(thread.id) || threadBusy(pendingSessions.values(), thread.id, Date.now())) {
+    await thread.send(BUSY_NOTE).catch(() => {})
+    return
+  }
+  startingThreads.add(thread.id)
+  try {
+    return await startThreadReply(msg, thread, trigger)
+  } finally {
+    startingThreads.delete(thread.id)
+  }
+}
+
+async function startThreadReply(msg: Message, thread: ThreadChannel, trigger: BotChannelTrigger) {
+  const starter = await thread.fetchStarterMessage().catch((err) => {
+    console.warn(`[Bot] No starter message for thread ${thread.id}, answering without it:`, err?.message ?? err)
+    return null
+  })
+  const recent = await thread.messages.fetch({ limit: 30 }).catch(() => null)
+  const asLine = (m: Message) => ({ author: m.author.username, isBot: m.author.bot, content: extractDiscordText(toLike(m)) })
+  const replies = [...(recent?.values() ?? [])]
+    .filter(m => m.id !== msg.id && m.id !== starter?.id && !m.system)
+    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+    .map(asLine)
+  const text = composeThreadText(starter ? asLine(starter) : null, replies, msg.author.username, extractDiscordText(toLike(msg)))
+  console.log(`[Bot] thread reply ${msg.id} in ${trigger.name}/${thread.id} from ${msg.author.username}: ${msg.content.slice(0, 100).replace(/\n/g, ' ')}`)
+  await react(msg, '👀')
+  return startSession(msg, trigger, text, msg.id, thread.id, false)
+}
+
 client.on('messageCreate', async (msg) => {
-  // Ignore our own messages to prevent loops.
-  if (msg.author.id === client.user?.id) return
-  if (!myTriggers().some(t => t.channelId === msg.channelId)) return
-  await handleMessage(msg, 'gateway')
+  const route = routeMessage(myTriggers(), {
+    channelId: msg.channelId,
+    parentId: msg.channel.isThread() ? msg.channel.parentId : null,
+    isThread: msg.channel.isThread(),
+    isSelf: msg.author.id === client.user?.id,
+    isSystem: msg.system,
+    authorIsBot: msg.author.bot,
+  })
+  if (route.kind === 'channel') await handleMessage(msg, 'gateway')
+  else if (route.kind === 'thread') await handleThreadReply(msg, route.trigger)
 })
 
 function readJsonBody(req: http.IncomingMessage): Promise<string> {
