@@ -124,3 +124,33 @@ def diff_in_diff(before: list[dict], after: list[dict], targets: set[str], seed:
     boot = sorted(effect(True) for _ in range(RESAMPLES))
     return {"effect": effect(False), "ci_low": _percentile(boot, 0.025), "ci_high": _percentile(boot, 0.975),
             "n_target": len(tgt), "n_control": len(ctl), "readable": True}
+
+
+def continuous_did(before: dict[str, float], after: dict[str, float], targets: set[str], seed: int = 0,
+                   min_targets: int = 2, min_controls: int = 5, min_target_volume: float = 100) -> dict:
+    """Difference in differences on a continuous measure per query (Search Console impressions or
+    clicks over a window). Each query's change is log1p(after) minus log1p(before), so a query that
+    doubles counts the same whether it had 10 or 1,000 impressions; a query missing from a window
+    counts as zero there. effect is the mean change of the targeted queries minus the mean change
+    of the controls; relative is exp(effect) minus 1. A bootstrap resamples queries within each
+    group. Not readable when the targets had under min_target_volume before, or either side is
+    short of queries."""
+    queries = set(before) | set(after)
+    tgt = sorted(queries & targets)
+    ctl = sorted(queries - targets)
+    volume = sum(before.get(q, 0) for q in tgt)
+    if len(tgt) < min_targets or len(ctl) < min_controls or volume < min_target_volume:
+        return {"effect": 0.0, "relative": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n_target": len(tgt),
+                "n_control": len(ctl), "target_volume": volume, "readable": False}
+    delta = {q: math.log1p(after.get(q, 0)) - math.log1p(before.get(q, 0)) for q in queries}
+    rng = random.Random(seed)
+
+    def effect(t: list[str], c: list[str]) -> float:
+        return sum(delta[q] for q in t) / len(t) - sum(delta[q] for q in c) / len(c)
+
+    boot = sorted(effect([rng.choice(tgt) for _ in tgt], [rng.choice(ctl) for _ in ctl]) for _ in range(RESAMPLES))
+    e = effect(tgt, ctl)
+    low, high = _percentile(boot, 0.025), _percentile(boot, 0.975)
+    return {"effect": e, "relative": math.exp(e) - 1, "ci_low": low, "ci_high": high,
+            "ci_low_relative": math.exp(low) - 1, "ci_high_relative": math.exp(high) - 1,
+            "n_target": len(tgt), "n_control": len(ctl), "target_volume": volume, "readable": True}

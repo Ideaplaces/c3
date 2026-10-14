@@ -149,3 +149,32 @@ def test_diff_in_diff_needs_two_targets_and_counts_noise_within_prompts():
     noisy = rows({f"p{i}": ((1 if i < 2 else 0), 2) for i in range(30)})
     d = stats.diff_in_diff(before, noisy, {"p0", "p1"}, seed=1)
     assert d["effect"] == 0.5 and d["ci_low"] <= 0
+
+
+def _windows(target_change, control_change, n_target=8, n_control=30, base=20):
+    before = {f"t{i}": base for i in range(n_target)} | {f"c{i}": base for i in range(n_control)}
+    after = {f"t{i}": base * target_change for i in range(n_target)} | {f"c{i}": base * control_change for i in range(n_control)}
+    return before, after, {f"t{i}" for i in range(n_target)}
+
+
+def test_continuous_did_reads_a_relative_change_net_of_the_controls():
+    before, after, targets = _windows(2.0, 1.0)
+    d = stats.continuous_did(before, after, targets, seed=1)
+    assert d["readable"] and 0.9 < d["relative"] < 1.1 and d["ci_low"] > 0  # doubled, about +100 percent
+    before, after, targets = _windows(2.0, 2.0)  # everything doubled: the change is not ours
+    d = stats.continuous_did(before, after, targets, seed=1)
+    assert abs(d["relative"]) < 0.01 and d["ci_low"] <= 0 <= d["ci_high"]
+
+
+def test_continuous_did_needs_volume_and_enough_queries():
+    before, after, targets = _windows(2.0, 1.0, base=2)  # 16 impressions before: too thin
+    assert stats.continuous_did(before, after, targets, seed=1, min_target_volume=100)["readable"] is False
+    before, after, targets = _windows(2.0, 1.0, n_control=3)
+    assert stats.continuous_did(before, after, targets, seed=1)["readable"] is False
+
+
+def test_continuous_did_counts_a_query_missing_from_a_window_as_zero():
+    before = {"t0": 50, "t1": 50, "c0": 10, "c1": 10, "c2": 10, "c3": 10, "c4": 10}
+    after = {"t0": 50, "c0": 10, "c1": 10, "c2": 10, "c3": 10, "c4": 10}  # t1 vanished
+    d = stats.continuous_did(before, after, {"t0", "t1"}, seed=1, min_target_volume=0, min_targets=2)
+    assert d["effect"] < 0
