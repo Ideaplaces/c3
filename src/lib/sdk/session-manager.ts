@@ -49,6 +49,12 @@ const MAX_SESSION_DURATION_MS = parseInt(process.env.C3_MAX_SESSION_DURATION_MS 
 export class SessionManager extends EventEmitter {
   private activeSessions = new Map<string, ActiveSession>()
   private eventBuffers = new Map<string, { sessionId: string; message: unknown }[]>()
+  /**
+   * Where the current run's events start in the session's buffer. A resumed
+   * session keeps its whole history in one buffer, and a reply to the newest
+   * message must be read from this run only, not from an earlier answer.
+   */
+  private runStart = new Map<string, number>()
   private lastEventTime = new Map<string, number>()
   private sessionStartTime = new Map<string, number>()
 
@@ -257,7 +263,12 @@ export class SessionManager extends EventEmitter {
     this.emit('session_ended', sessionId, errMessage)
   }
 
-  async resumeSession(sessionId: string, prompt: string): Promise<void> {
+  /**
+   * Continue a session with a new message. `label` and `maxDurationMs` let a
+   * trigger resume its own session (a Discord thread follow-up) and still be
+   * counted and capped as that trigger, not as an anonymous 'resume'.
+   */
+  async resumeSession(sessionId: string, prompt: string, opts: { label?: string; maxDurationMs?: number; model?: string } = {}): Promise<void> {
     const active = this.activeSessions.get(sessionId)
 
     if (active) {
@@ -289,8 +300,11 @@ export class SessionManager extends EventEmitter {
     delete cleanEnv.SLACK_BOT_TOKEN
     delete cleanEnv.DISCORD_BOT_TOKEN
 
+    this.runStart.set(sessionId, this.eventBuffers.get(sessionId)?.length ?? 0)
+    const model = opts.model ?? sessionMeta?.model
     const options: Options = {
       resume: sessionId,
+      ...(model ? { model } : {}),
       abortController,
       includePartialMessages: true,
       settingSources: ['project'],
@@ -309,10 +323,12 @@ export class SessionManager extends EventEmitter {
       query: q,
       abortController,
       projectPath,
-      label: 'resume',
-      model: sessionMeta?.model ?? DEFAULT_MODEL,
+      label: opts.label ?? 'resume',
+      model: model ?? DEFAULT_MODEL,
+      ...(opts.maxDurationMs ? { maxDurationMs: opts.maxDurationMs } : {}),
     })
     this.sessionStartTime.set(sessionId, Date.now())
+    if (opts.label) startUsageTracking(sessionId, opts.label)
 
     // Create/update CCC overlay entry
     if (sessionMeta) {
@@ -354,6 +370,13 @@ export class SessionManager extends EventEmitter {
 
   isSessionActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId)
+  }
+
+  /** The events of the session's current or last run only (see runStart). */
+  getRunEvents(sessionId: string): { sessionId: string; message: unknown }[] {
+    const start = this.runStart.get(sessionId)
+    if (start === undefined) return this.getBufferedEvents(sessionId)
+    return (this.eventBuffers.get(sessionId) ?? []).slice(start)
   }
 
   getBufferedEvents(sessionId: string): { sessionId: string; message: unknown }[] {

@@ -249,6 +249,36 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('resumeSession as a trigger (a Discord thread follow-up)', () => {
+    const answer = (text: string) => ({ type: 'assistant', session_id: 's', message: { content: [{ type: 'text', text }] } })
+
+    it('pins the model and keeps the label and duration cap of the trigger', async () => {
+      mockMessages = []
+      // Read the active entry before the (empty) run ends and cleans it up.
+      const running = manager.resumeSession('s', 'more', { label: 'discord:superfan-tour-calls', maxDurationMs: 1234, model: 'claude-opus-5-5[1m]' })
+      const active = manager.getActiveSession('s') as { label: string; maxDurationMs?: number } | undefined
+      await running
+      const opts = (queryCallArgs[0] as [{ options: { model?: string; resume: string } }])[0].options
+      expect(opts.model).toBe('claude-opus-5-5[1m]')
+      expect(opts.resume).toBe('s')
+      expect(active?.label).toBe('discord:superfan-tour-calls')
+      expect(active?.maxDurationMs).toBe(1234)
+    })
+
+    it('reads only the current run, not the earlier answers in the same session', async () => {
+      mockMessages = [answer('first answer')]
+      await manager.resumeSession('s', 'one')
+      await new Promise(r => setTimeout(r, 30))
+      mockMessages = [answer('second answer')]
+      await manager.resumeSession('s', 'two')
+      await new Promise(r => setTimeout(r, 30))
+      const texts = manager.getRunEvents('s').map(e => JSON.stringify(e.message))
+      expect(texts.join()).toContain('second answer')
+      expect(texts.join()).not.toContain('first answer')
+      expect(manager.getBufferedEvents('s').length).toBeGreaterThan(texts.length)
+    })
+  })
+
   describe('stopSession', () => {
     it('stops an active session', async () => {
       mockMessages = [
