@@ -194,7 +194,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
  * what gets the eyes or the cross; `subjectId` and `threadId` are where the
  * answer is posted.
  */
-async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean) {
+async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean, followUp?: string) {
   try {
     const response = await fetch(`${CCC_URL}/api/webhooks/discord`, {
       method: 'POST',
@@ -208,12 +208,19 @@ async function startSession(msg: Message, trigger: BotChannelTrigger, text: stri
         author: msg.author.username,
         messageId: subjectId,
         threadId,
+        followUp,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),
     })
 
     const data = await response.json() as { sessionId?: string; trigger?: string; error?: string }
 
+    if (response.status === 409 && threadId) {
+      // The thread's session is still answering the previous message.
+      const thread = await client.channels.fetch(threadId).catch(() => null)
+      if (thread?.isThread()) await thread.send(BUSY_NOTE).catch(() => {})
+      return { started: false, reason: 'thread session busy' }
+    }
     if (response.ok && data.sessionId) {
       pendingSessions.set(data.sessionId, { channelId: trigger.channelId, messageId: subjectId, threadId, startedAt: Date.now() })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
@@ -274,7 +281,9 @@ async function startThreadReply(msg: Message, thread: ThreadChannel, trigger: Bo
   const text = composeThreadText(starter ? asLine(starter) : null, replies, msg.author.username, extractDiscordText(toLike(msg)))
   console.log(`[Bot] thread reply ${msg.id} in ${trigger.name}/${thread.id} from ${msg.author.username}: ${msg.content.slice(0, 100).replace(/\n/g, ' ')}`)
   await react(msg, '👀')
-  return startSession(msg, trigger, text, msg.id, thread.id, false)
+  // `text` carries the whole thread for a new session; `followUp` is the new message
+  // alone, which the server uses to resume the thread's own session when it has one.
+  return startSession(msg, trigger, text, msg.id, thread.id, false, extractDiscordText(toLike(msg)))
 }
 
 client.on('messageCreate', async (msg) => {

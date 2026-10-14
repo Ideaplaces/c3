@@ -4,6 +4,15 @@ import { recordSkippedRun } from '@/lib/usage'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
+import { followUpPrompt, linkThread, sessionForThread } from '@/lib/webhooks/discord-threads'
+import { getSession } from '@/lib/store/sessions'
+import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+
+// Threads with a request between "received" and "session linked or resumed". A
+// second message in the same thread meanwhile (a quick reply during the first
+// message's precheck, two replies at once) is told the thread is busy instead of
+// starting a second session that would overwrite the link.
+const busyThreads = new Set<string>()
 
 export async function POST(request: Request) {
   // Verify shared secret
@@ -14,9 +23,11 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { channelId, message, author, messageId, threadId } = body as {
+  const { channelId, message, author, messageId, threadId, followUp } = body as {
     channelId?: string; message?: string; author?: string; messageId?: string; threadId?: string
     callbackUrl?: string
+    /** A reply inside a thread: the person's new message alone, for resuming the thread's session. */
+    followUp?: string
   }
 
   if (!channelId || !message) {
@@ -31,6 +42,12 @@ export async function POST(request: Request) {
   }
 
   console.log(`[Webhook] Trigger "${trigger.name}" fired by ${author} in channel ${channelId}`)
+
+  const threadKey = trigger.thread && threadId ? threadId : null
+  if (threadKey && busyThreads.has(threadKey)) {
+    return Response.json({ trigger: trigger.name, status: 'busy' }, { status: 409 })
+  }
+  const handle = async (): Promise<Response> => {
 
   // Build prompt from template + message context
   const prompt = loadPromptTemplate(trigger.prompt, {
@@ -58,16 +75,42 @@ export async function POST(request: Request) {
     }
   }
 
-  const sessionId = await sessionManager.startSession({
-    projectPath: trigger.projectPath,
-    prompt,
-    permissionMode: trigger.permissionMode || 'bypassPermissions',
-    model: trigger.model || DEFAULT_MODEL,
-    label: `discord:${trigger.name}`,
-    maxDurationMs: trigger.maxDurationMs,
-  })
+  // A thread is one conversation and one session: a reply resumes the session the
+  // thread's first message started. With no live link (a thread a person opened,
+  // a session that is gone) it starts a new one from the composed thread text.
+  const label = `discord:${trigger.name}`
+  const reply = typeof followUp === 'string' && followUp.trim() ? followUp : null
+  const linked = trigger.thread && threadId && reply ? sessionForThread(threadId) : null
+  // Gone means gone: the overlay entry outlives the SDK transcript, and resuming a
+  // session with no transcript fails every reply in the thread.
+  const resumable = linked && linked.trigger === trigger.name && getSession(linked.sessionId) && getSessionJSONLPath(linked.sessionId)
+    ? linked.sessionId
+    : null
+  if (resumable && sessionManager.isSessionActive(resumable)) {
+    return Response.json({ trigger: trigger.name, status: 'busy', sessionId: resumable }, { status: 409 })
+  }
 
-  console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
+  let sessionId: string
+  if (resumable) {
+    sessionId = resumable
+    await sessionManager.resumeSession(sessionId, followUpPrompt(author || 'someone', reply!), {
+      label,
+      maxDurationMs: trigger.maxDurationMs,
+      model: trigger.model || DEFAULT_MODEL,
+    })
+    console.log(`[Webhook] Resumed session ${sessionId} for a reply in thread ${threadId} ("${trigger.name}")`)
+  } else {
+    sessionId = await sessionManager.startSession({
+      projectPath: trigger.projectPath,
+      prompt,
+      permissionMode: trigger.permissionMode || 'bypassPermissions',
+      model: trigger.model || DEFAULT_MODEL,
+      label,
+      maxDurationMs: trigger.maxDurationMs,
+    })
+    if (trigger.thread && threadId) linkThread(threadId, sessionId, trigger.name)
+    console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
+  }
 
   // Set up completion callback: post reply to Discord and/or call external URL.
   // A trigger served by another bot identity carries its own token; the reply
@@ -80,11 +123,12 @@ export async function POST(request: Request) {
     sessionManager.removeListener('session_ended', onSessionEnded)
     console.log(`[Webhook] Session ${sessionId} ended (${reason})`)
 
-    const events = sessionManager.getBufferedEvents(sessionId)
+    // This run only: a resumed session's buffer also holds every earlier answer.
+    const events = sessionManager.getRunEvents(sessionId)
     const failure = detectSessionFailure(events, reason)
 
     // Extract summary from buffered events
-    const summary = extractSummary(sessionId, reason)
+    const summary = extractSummary(events, reason)
 
     // Reply in Discord directly
     if (discordBotToken && messageId) {
@@ -153,11 +197,18 @@ export async function POST(request: Request) {
 
   sessionManager.on('session_ended', onSessionEnded)
 
-  return Response.json({ sessionId, trigger: trigger.name, status: 'started' })
+  return Response.json({ sessionId, trigger: trigger.name, status: resumable ? 'resumed' : 'started' })
+  }
+
+  if (threadKey) busyThreads.add(threadKey)
+  try {
+    return await handle()
+  } finally {
+    if (threadKey) busyThreads.delete(threadKey)
+  }
 }
 
-function extractSummary(sessionId: string, reason: string): string {
-  const events = sessionManager.getBufferedEvents(sessionId)
+function extractSummary(events: { message: unknown }[], reason: string): string {
 
   for (let i = events.length - 1; i >= 0; i--) {
     const msg = events[i].message as Record<string, unknown>
