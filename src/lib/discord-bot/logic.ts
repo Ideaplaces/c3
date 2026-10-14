@@ -194,3 +194,99 @@ export function formatSessionResult(result: SessionResultLike, baseUrl: string):
     ...resume,
   ].join('\n')
 }
+
+export interface IncomingLike {
+  channelId: string
+  /** The parent channel when the message was posted inside a thread. */
+  parentId?: string | null
+  isThread: boolean
+  isSelf: boolean
+  isSystem: boolean
+  authorIsBot: boolean
+}
+
+export type Route<T> = { kind: 'channel'; trigger: T } | { kind: 'thread'; trigger: T } | { kind: 'ignore' }
+
+/**
+ * Where one gateway message goes. A message in a trigger's channel (or in a thread
+ * that is itself a trigger) takes the normal path. A person replying inside a
+ * thread under a `thread: true` trigger is talking to the same agent, so it starts
+ * a follow-up session there (Chip, 2026-10-14, on the superfan channels: "it should
+ * be a thread with a subsection", the way Slack threads work). Never for bots, the
+ * bot itself, Discord's system messages, mention triggers, or a trigger pinned to a
+ * webhook: its threads are where people talk next to an app's reports for free.
+ */
+export function routeMessage<T extends BotChannelTrigger>(triggers: T[], msg: IncomingLike): Route<T> {
+  if (msg.isSelf || msg.isSystem) return { kind: 'ignore' }
+  const own = triggers.find(t => t.channelId === msg.channelId)
+  if (own) return { kind: 'channel', trigger: own }
+  if (!msg.isThread || msg.authorIsBot || !msg.parentId) return { kind: 'ignore' }
+  const parent = triggers.find(t => t.channelId === msg.parentId)
+  if (!parent || !parent.thread || parent.mention || parent.webhookId) return { kind: 'ignore' }
+  return { kind: 'thread', trigger: parent }
+}
+
+/** How long a thread waits on an unanswered session before taking the next reply anyway. */
+export const THREAD_BUSY_TTL_MS = 60 * 60 * 1000
+
+export const BUSY_NOTE = 'Still working on the previous message. Send this again once I have answered.'
+
+/**
+ * Whether a thread already has a session working for it. An entry older than the
+ * TTL is treated as lost: a server restart drops the completion callback, and the
+ * thread must not stay locked until the bot restarts.
+ */
+export function threadBusy(entries: Iterable<{ threadId?: string; startedAt: number }>, threadId: string, now: number, ttlMs = THREAD_BUSY_TTL_MS): boolean {
+  for (const e of entries) if (e.threadId === threadId && now - e.startedAt < ttlMs) return true
+  return false
+}
+
+export interface ThreadLine {
+  author: string
+  isBot: boolean
+  content: string
+}
+
+/**
+ * What a bot line in the thread contributed to the conversation: the answer, not
+ * the "On it" line, the session link or the resume command around it.
+ */
+export function agentAnswer(content: string): string | null {
+  const text = content.trim()
+  if (/^On it\. Session: /.test(text) || text === BUSY_NOTE) return null
+  if (/^:warning: \*\*Agent session failed\*\*/.test(text)) return '(that run failed before answering)'
+  const done = text.match(/^\*\*Session completed\*\*[^\n]*([\s\S]*?)(?:\s*View full session:[\s\S]*)?$/)
+  return done ? done[1].trim() || null : text
+}
+
+export function clip(text: string, max: number): string {
+  return text.length > max ? text.slice(0, Math.max(0, max - 1)) + '…' : text
+}
+
+/**
+ * A follow-up in a thread as one block for the prompt: the opening message, the
+ * replies so far oldest first, then the new message. Each session starts fresh, so
+ * without the history a second question ("and last month?") has nothing to refer
+ * to. The result never exceeds maxChars: the new message keeps up to 60% of it and
+ * the opening up to 20%, then the oldest replies go first.
+ */
+export function composeThreadText(opening: ThreadLine | null, replies: ThreadLine[], author: string, request: string, maxChars = 6000): string {
+  const line = (l: ThreadLine) => {
+    const content = l.isBot ? agentAnswer(l.content) : l.content.trim()
+    return content ? `${l.isBot ? 'Agent' : l.author}: ${content}` : null
+  }
+  const head = 'Conversation so far in this thread, oldest first:'
+  const gap = '(earlier messages left out)'
+  // The fixed text (header, gap marker, blank lines) comes off the top, so the cap holds at any size.
+  const room = Math.max(0, maxChars - head.length - gap.length - 4 * 2)
+  const ask = clip(`New message from ${author} in this thread: ${request.trim()}`, Math.floor(room * 0.6))
+  const openingMax = Math.floor(room * 0.2)
+  const first = opening ? line(opening) : null
+  const rest = replies.map(line).filter((l): l is string => l !== null)
+  if (!first && !rest.length) return ask
+  const build = (kept: string[]) =>
+    [head, ...(first ? [clip(first, openingMax)] : []), ...(kept.length < rest.length ? [gap] : []), ...kept, ask].join('\n\n')
+  let kept = rest
+  while (kept.length && build(kept).length > maxChars) kept = kept.slice(1)
+  return build(kept)
+}

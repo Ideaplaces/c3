@@ -104,7 +104,11 @@ feedback bot.
 Three more channel trigger fields came with it. `webhookId` pins the trigger
 to one webhook, so people can talk in the channel next to an app's reports
 without starting a session each time. `thread: true` opens a thread on the
-message and every reply goes there. `discordBotToken` (usually `${VAR}`) is
+message and every reply goes there; a person replying inside that thread (any
+thread under the channel) starts a follow-up session that gets the thread so far
+as context and answers in the same thread, one session per thread at a time.
+`routeMessage` in `src/lib/discord-bot/logic.ts` decides, and leaves out bots,
+system messages, mention triggers and webhook-pinned triggers. `discordBotToken` (usually `${VAR}`) is
 what the webhook route posts the completion notice with, since the reply has
 to come from the bot that is a member of that server. Embeds and attachments
 are folded into the session text; a report posted as an embed used to reach
