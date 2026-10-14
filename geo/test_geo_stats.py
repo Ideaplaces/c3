@@ -178,3 +178,23 @@ def test_continuous_did_counts_a_query_missing_from_a_window_as_zero():
     after = {"t0": 50, "c0": 10, "c1": 10, "c2": 10, "c3": 10, "c4": 10}  # t1 vanished
     d = stats.continuous_did(before, after, {"t0", "t1"}, seed=1, min_target_volume=0, min_targets=2)
     assert d["effect"] < 0
+
+
+def test_continuous_did_needs_two_targets_and_reads_volume_before_the_change():
+    before, after, targets = _windows(2.0, 1.0)
+    one = {sorted(targets)[0]}
+    assert stats.continuous_did(before, after, one, seed=1)["readable"] is False  # one targeted query is no group
+    thin_before = {q: (5 if q in targets else v) for q, v in before.items()}
+    rich_after = {q: (500 if q in targets else v) for q, v in after.items()}
+    d = stats.continuous_did(thin_before, rich_after, targets, seed=1, min_target_volume=100)
+    assert d["readable"] is False and d["target_volume"] == 5 * len(targets)
+
+
+def test_continuous_did_bootstrap_resamples_queries():
+    import random
+    rng = random.Random(2)
+    queries = [f"t{i}" for i in range(6)] + [f"c{i}" for i in range(12)]
+    before = {q: 40 for q in queries}
+    after = {q: max(1, int(40 * rng.uniform(0.5, 2.5))) for q in queries}
+    d = stats.continuous_did(before, after, {q for q in queries if q.startswith("t")}, seed=1)
+    assert d["readable"] and d["ci_high"] - d["ci_low"] > 0.05 and d["ci_low"] < d["effect"] < d["ci_high"]
