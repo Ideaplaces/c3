@@ -1,5 +1,4 @@
 import { join } from 'path'
-import { postDiscordMessage } from '@/lib/webhooks/discord-mirror'
 import {
   addTurn,
   alertThreshold,
@@ -32,13 +31,13 @@ function sessionUrl(sessionId: string): string {
   return `${base}/sessions/${sessionId}`
 }
 
-async function post(text: string): Promise<void> {
-  const token = process.env.DISCORD_BOT_TOKEN
-  if (!token) {
-    console.warn('[Usage] alert not posted, DISCORD_BOT_TOKEN is unset:', text)
-    return
-  }
-  await postDiscordMessage(token, USAGE_CHANNEL_ID, text)
+/**
+ * Usage alerts go to the log, never to Discord (Chip, 2026-10-19: every C3 post is one "I need to
+ * act on"). A run over its line needs no hand: C3 caps its duration and its stalls. The ledger and
+ * this log are the record, and the weekly cost reading asks when a trigger needs trimming.
+ */
+function note(text: string): void {
+  console.warn(`[Usage] ${text}`)
 }
 
 interface Tracked {
@@ -71,17 +70,12 @@ export async function trackAssistantUsage(
   if (!shouldAlert(t.state, t.threshold)) return
   t.state.alertedAt.push(t.state.contextTokens)
   const text = formatRunningAlert(t.label, t.state, t.baseline, t.threshold, sessionUrl(sessionId))
-  console.warn(`[Usage] ${text}`)
-  try {
-    await post(text)
-  } catch (err) {
-    console.error('[Usage] could not post the running alert:', err)
-  }
+  note(text)
 }
 
 /**
  * Record a finished session. Best effort by design: a ledger failure must
- * never break session handling. Discord hears about it only if the run was
+ * never break session handling. The log hears about it if the run was
  * already alerted mid-flight (a closing line) or ends up an outlier.
  */
 export async function recordSessionUsage(
@@ -101,9 +95,9 @@ export async function recordSessionUsage(
         `$${record.costUsd.toFixed(2)}${verdict.outlier ? ' OUTLIER' : ''}`,
     )
     if (t && t.state.alertedAt.length > 0) {
-      await post(formatRunningClose(record.label, record, t.state.alertedAt.length))
+      note(formatRunningClose(record.label, record, t.state.alertedAt.length))
     } else if (verdict.outlier) {
-      await post(formatOutlier(record, verdict))
+      note(formatOutlier(record, verdict))
     }
   } catch (err) {
     console.error('[Usage] could not record session usage:', err)
@@ -144,7 +138,7 @@ export async function recordSessionEndedWithoutResult(
     }
     appendUsage(usageLedgerPath(), record)
     console.log(`[Usage] ${record.label}: ${record.status}, ${record.turns} turns, ${record.contextTokens} context tokens`)
-    if (t.state.alertedAt.length > 0) await post(formatRunningClose(record.label, record, t.state.alertedAt.length))
+    if (t.state.alertedAt.length > 0) note(formatRunningClose(record.label, record, t.state.alertedAt.length))
   } catch (err) {
     console.error('[Usage] could not record the ended session:', err)
   }
