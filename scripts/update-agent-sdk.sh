@@ -4,9 +4,9 @@
 # C3 runs the SDK's bundled Claude Code runtime, not the claude on PATH, so a
 # stale pin quietly costs tokens (0.2.50 sat from April to August 2026 and
 # tripled turn-one context every morning). This runs from system cron on
-# chipdev, Sundays 04:00 ET, and behaves like the rest of the fleet: silent
-# when there is nothing to do, one Discord line when something changed or
-# failed.
+# chipdev, Sundays 04:00 ET, and behaves like the rest of the fleet: one
+# Discord line when it failed, and only then (Chip, 2026-10-19: every C3 post
+# is one he has to act on). A green update is in git and in the log.
 #
 #   scripts/update-agent-sdk.sh            # normal weekly run
 #   scripts/update-agent-sdk.sh --force    # reinstall the current version to exercise the path
@@ -15,7 +15,7 @@
 # Gate before anything is committed: src/ typecheck (the pre-push rule), the
 # full vitest suite, next build. Green: commit to main, push, restart the local
 # instance unless a session is running (then the restart waits for next week),
-# post. Red: package.json and the lock are restored, nothing is pushed, post
+# log it. Red: package.json and the lock are restored, nothing is pushed, post
 # the failing step and the log path.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -73,4 +73,4 @@ else
   RESTART="restart deferred, $RUNNING session(s) running"
 fi
 log "done: $CUR -> $LATEST runtime $RUNTIME, $TESTS, $RESTART"
-post "**C3 Agent SDK** $CUR -> $LATEST (runtime $RUNTIME). $TESTS. Local instance $RESTART."
+log "updated: $CUR -> $LATEST (runtime $RUNTIME). $TESTS. Local instance $RESTART."
