@@ -192,3 +192,42 @@ def test_load_lowercases_names_and_main_honours_limit(tmp_path):
     finally:
         gm.KINDS["azure-openai"] = orig
     assert len((tmp_path / "runs/w-p1.jsonl").read_text().splitlines()) == 2
+
+
+def test_a_multilingual_panel_asks_each_question_in_its_own_language(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setitem(gm.KINDS, "azure-openai", lambda q, prompt, e: seen.append(prompt.format(q=q)) or ("x", [], "m", {}))
+    panel = tmp_path / "panel.v2.json"
+    panel.write_text(json.dumps({"panel_v": 2, "prompts": [
+        {"id": "a", "q": "TuriTop alternative", "intent": "comparison", "segment": "company", "locale": "en", "market": "ES-CN"},
+        {"id": "b", "q": "alternativas a TuriTop", "intent": "comparison", "segment": "company", "locale": "es", "market": "ES-CN"}]}))
+    c = {**cfg(tmp_path), "panel": str(panel), "prompt": {"en": "Search {q}.", "es": "Busca {q}."}}
+    assert gm.run(c, ["azure"], "w", runs=1) == 0
+    assert sorted(seen) == ["Busca alternativas a TuriTop.", "Search TuriTop alternative."]
+    rows = [json.loads(l) for l in (tmp_path / "runs/w-p2.jsonl").read_text().splitlines()]
+    assert {(r["locale"], r["market"]) for r in rows} == {("en", "ES-CN"), ("es", "ES-CN")}
+
+
+def test_a_locale_without_a_template_fails_before_anything_is_asked(tmp_path):
+    c = {**cfg(tmp_path), "prompt": {"es": "Busca {q}."}}
+    try:
+        gm.run(c, ["azure"], "w", askers={"azure": lambda q: ("x", [], "m", {})})
+        assert False
+    except ValueError as exc:
+        assert "'en'" in str(exc)
+    assert not (tmp_path / "runs/w-p1.jsonl").exists()
+
+
+def test_a_single_template_serves_every_locale_and_rows_without_market_stay_as_they_were(tmp_path):
+    assert gm.template({"prompt": "Use {q}"}, "de") == "Use {q}"
+    p = {"id": "a", "q": "x", "intent": "i", "segment": "s", "locale": "en"}
+    assert "market" not in gm.answer_row(cfg(tmp_path), "azure", lambda q: ("x", [], "m", {}), p, 0, "w", 1)
+
+
+def test_a_template_without_the_question_fails_before_anything_is_asked(tmp_path):
+    c = {**cfg(tmp_path), "prompt": {"en": "Search {query}."}}
+    try:
+        gm.run(c, ["azure"], "w", askers={"azure": lambda q: ("x", [], "m", {})})
+        assert False
+    except ValueError as exc:
+        assert "{q}" in str(exc)

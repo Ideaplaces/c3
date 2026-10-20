@@ -24,6 +24,10 @@ billed to its own accounts. A config looks like:
 
 An engine marked "default": false runs only when named with --engines.
 
+A multilingual panel gives "prompt" as one template per locale, {"en": "...", "es": "..."}, and each
+question is asked in its own language's template; a single string serves every question. A panel
+prompt may carry a "market" tag, which its rows keep.
+
 Usage: geo_measure.py --config <product.json> [--engines a,b] [--wave YYYY-MM-DD] [--limit N] [--runs N] [--no-upload]
 """
 from __future__ import annotations
@@ -188,6 +192,8 @@ def answer_row(cfg: dict, engine: str, ask, prompt: dict, run: int, wave: str, p
            "surface": "cli" if kind == "claude-code" else "api", "prompt_id": prompt["id"], "q": prompt["q"],
            "intent": prompt["intent"], "segment": prompt["segment"], "locale": prompt["locale"], "run": run,
            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if "market" in prompt:
+        row["market"] = prompt["market"]
     try:
         text, cites, model, usage = ask(prompt["q"])
         row.update(model=model, answered=bool(text.strip()), named=named(text, cfg["aliases"]),
@@ -206,18 +212,31 @@ def measure_prompt(cfg: dict, engine: str, ask, prompt: dict, wave: str, panel_v
     return rows
 
 
-def asker(cfg: dict, engine: str):
+def template(cfg: dict, locale: str | None) -> str:
+    """The instruction a question is asked in: the config's one string, or its locale's entry."""
+    t = cfg["prompt"]
+    if isinstance(t, str):
+        return t
+    if locale not in t:
+        raise ValueError(f"no prompt template for locale {locale!r}; the config has {sorted(t)}")
+    if "{q}" not in t[locale]:
+        raise ValueError(f"the prompt template for locale {locale!r} does not contain {{q}}")
+    return t[locale]
+
+
+def asker(cfg: dict, engine: str, locale: str | None = None):
     e = cfg["engines"][engine]
     fn = KINDS[e["kind"]]
-    return lambda q: fn(q, cfg["prompt"], e)
+    t = template(cfg, locale)
+    return lambda q: fn(q, t, e)
 
 
 def measure_engine(cfg: dict, engine: str, prompts: list[dict], wave: str, out: Path, panel_v: int,
                    runs: int = 0, ask=None) -> list[dict]:
-    ask = ask or asker(cfg, engine)
     rows: list[dict] = []
     with cf.ThreadPoolExecutor(cfg["engines"].get(engine, {}).get("workers", 1)) as pool:
-        for batch in pool.map(lambda p: measure_prompt(cfg, engine, ask, p, wave, panel_v, runs), prompts):
+        for batch in pool.map(lambda p: measure_prompt(cfg, engine, ask or asker(cfg, engine, p.get("locale")), p,
+                                                       wave, panel_v, runs), prompts):
             with WRITE, out.open("a") as f:
                 for row in batch:
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -240,6 +259,8 @@ def run(cfg: dict, engines: list[str], wave: str, limit: int = 0, runs: int = 0,
         askers: dict | None = None) -> int:
     panel = json.loads(Path(cfg["panel"]).read_text())
     prompts = panel["prompts"][: limit or None]
+    for locale in {p.get("locale") for p in prompts}:
+        template(cfg, locale)  # a missing template fails before any question is asked or file written
     runs_dir = Path(os.path.expanduser(cfg["runs_dir"]))
     runs_dir.mkdir(parents=True, exist_ok=True)
     out = runs_dir / f"{wave}-p{panel['panel_v']}.jsonl"
