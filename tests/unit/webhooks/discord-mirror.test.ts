@@ -379,3 +379,26 @@ describe('slackMarkdownToDiscord', () => {
     expect(slackMarkdownToDiscord('same\nother\nsame')).toBe('same\nother\nsame')
   })
 })
+
+describe('postDiscordMessage nonce', () => {
+  function capture() {
+    const bodies: Record<string, unknown>[] = []
+    const fetchMock = vi.fn(async (_u: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'm1' }) } as unknown as Response
+    })
+    return { bodies, deps: { fetch: fetchMock as unknown as typeof fetch, sleep: async () => {} } }
+  }
+
+  it('asks Discord to enforce the nonce, so a retry after a lost answer is not a second message', async () => {
+    const { bodies, deps } = capture()
+    await postDiscordMessage('tok', 'chan', 'x', undefined, deps, 'nc123')
+    expect(bodies[0]).toMatchObject({ nonce: 'nc123', enforce_nonce: true })
+  })
+
+  it('sends no nonce when the caller has none', async () => {
+    const { bodies, deps } = capture()
+    await postDiscordMessage('tok', 'chan', 'x', undefined, deps)
+    expect(bodies[0]).not.toHaveProperty('nonce')
+  })
+})

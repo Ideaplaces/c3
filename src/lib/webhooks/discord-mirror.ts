@@ -230,6 +230,11 @@ export async function postDiscordMessage(
   content: string,
   replyToMessageId?: string,
   deps: PostDeps = defaultDeps,
+  /**
+   * Discord drops a second message carrying the same nonce for a few minutes, so a retry after a
+   * lost answer (a 5xx after the write landed) cannot post the message twice. At most 25 characters.
+   */
+  nonce?: string,
 ): Promise<string | null> {
   for (let attempt = 1; attempt <= POST_ATTEMPTS; attempt++) {
     const last = attempt === POST_ATTEMPTS
@@ -248,6 +253,7 @@ export async function postDiscordMessage(
                 allowed_mentions: { parse: [] },
               }
             : { allowed_mentions: { parse: [] } }),
+          ...(nonce ? { nonce, enforce_nonce: true } : {}),
         }),
       })
       if (!res.ok) {
