@@ -23,9 +23,11 @@ vi.mock('@/lib/sdk/session-manager', () => ({
   },
 }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
+vi.mock('@/lib/store/sessions', () => ({ getSession: () => null }))
 vi.mock('@/lib/triggers/config', () => ({
   getCronTrigger,
   loadPromptTemplate,
+  getCronDependents: () => [],
 }))
 
 import { POST } from '@/app/api/webhooks/cron/route'
@@ -206,9 +208,11 @@ describe('cron webhook postcheck', () => {
     expect(runPrecheck.mock.calls[0][2].C3_FAILURE).toBe('')
   })
 
-  it('does not watch a trigger without a postcheck, nor a session that failed to start', async () => {
+  it('stops watching once its session ends, runs no postcheck for a trigger without one, and leaves no watcher for a session that failed to start', async () => {
     getCronTrigger.mockReturnValue({ ...trigger, postcheck: undefined })
-    await POST(makeRequest({ triggerName: 'iris-review' }))
+    const { sessionId } = await (await POST(makeRequest({ triggerName: 'iris-review' }))).json()
+    sessionEvents.emit('session_ended', sessionId, 'completed')
+    expect(runPrecheck).not.toHaveBeenCalled()
     expect(sessionEvents.listenerCount('session_ended')).toBe(0)
 
     getCronTrigger.mockReturnValue(trigger)

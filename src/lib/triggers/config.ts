@@ -125,7 +125,19 @@ export interface CronTrigger {
    * src/lib/triggers/postcheck.ts.
    */
   postcheck?: string
+  /**
+   * The triggers this one runs after. When one of them ends `completed`, or is
+   * skipped by its precheck because it had nothing to do, C3 fires this trigger
+   * at once instead of leaving it to its clock, so a chain (spec keeper, help,
+   * judge, translations) runs in order and never reads half-finished work. The
+   * schedule stays as the fallback for a chain that broke upstream. An entry
+   * with `weekdays` (0 = Sunday, in America/Toronto) only follows on those days,
+   * for a weekly agent hanging off a daily one. See src/lib/triggers/fire.ts.
+   */
+  after?: ChainLink[]
 }
+
+export type ChainLink = string | { trigger: string; weekdays?: number[] }
 
 interface TriggersConfig {
   channels: Record<string, ChannelTrigger>
@@ -237,6 +249,39 @@ export function getCronTrigger(name: string): CronTrigger | null {
   const trigger = config.cron[name]
   if (!trigger) return null
   return { ...trigger, projectPath: resolveProjectPath(trigger.projectPath) }
+}
+
+/**
+ * The enabled triggers that run after `name` on `weekday` (0 = Sunday), in
+ * config order.
+ */
+export function getCronDependents(name: string, weekday: number): string[] {
+  const config = loadTriggersConfig()
+  if (!config.cron) return []
+  return Object.entries(config.cron)
+    .filter(([, t]) => t.enabled !== false)
+    .filter(([key, t]) => chainLinks(key, t.after).some(link => link.trigger === name && (!link.weekdays || link.weekdays.includes(weekday))))
+    .map(([key]) => key)
+}
+
+// A hand-edited `after` that is not a list of names or {trigger, weekdays}
+// is dropped with a warning instead of throwing, because the caller runs when
+// another trigger's session ends.
+function chainLinks(key: string, after: unknown): { trigger: string; weekdays?: number[] }[] {
+  if (after === undefined) return []
+  if (!Array.isArray(after)) {
+    console.warn(`[Config] cron trigger "${key}": "after" must be a list; ignored`)
+    return []
+  }
+  return after.flatMap(link => {
+    if (typeof link === 'string') return [{ trigger: link }]
+    const ok =
+      link && typeof link === 'object' && typeof link.trigger === 'string' &&
+      (link.weekdays === undefined ||
+        (Array.isArray(link.weekdays) && link.weekdays.every((d: unknown) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)))
+    if (!ok) console.warn(`[Config] cron trigger "${key}": "after" entry ${JSON.stringify(link)} ignored`)
+    return ok ? [link] : []
+  })
 }
 
 export function getAllCronTriggers(): CronTrigger[] {
