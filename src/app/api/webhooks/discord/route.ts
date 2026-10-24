@@ -7,6 +7,11 @@ import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
 import { followUpPrompt, linkThread, sessionForThread } from '@/lib/webhooks/discord-threads'
 import { getSession } from '@/lib/store/sessions'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+import { postDiscordMessage } from '@/lib/webhooks/discord-mirror'
+import { getInboxConfig } from '@/lib/inbox/config'
+import { markAnswered } from '@/lib/inbox/store'
+import { mirrorPostToInbox } from '@/lib/inbox/discord'
+import { nonceFor } from '@/lib/inbox/mirror'
 
 // Threads with a request between "received" and "session linked or resumed". A
 // second message in the same thread meanwhile (a quick reply during the first
@@ -47,7 +52,13 @@ export async function POST(request: Request) {
   if (threadKey && busyThreads.has(threadKey)) {
     return Response.json({ trigger: trigger.name, status: 'busy' }, { status: 409 })
   }
+  const inbox = getInboxConfig()
+  const isInbox = inbox?.trigger === trigger.name
   const handle = async (): Promise<Response> => {
+
+  // Chip answered an item in his inbox: it stops counting as open, so the same ask is posted
+  // again as a new line if an agent still needs it.
+  if (isInbox && threadId && followUp) markAnswered(threadId)
 
   // Build prompt from template + message context
   const prompt = loadPromptTemplate(trigger.prompt, {
@@ -118,7 +129,7 @@ export async function POST(request: Request) {
   const discordBotToken = trigger.discordBotToken || process.env.DISCORD_BOT_TOKEN
   const callbackUrl = body.callbackUrl
 
-  const onSessionEnded = (sid: string, reason: string) => {
+  const onSessionEnded = async (sid: string, reason: string) => {
     if (sid !== sessionId) return
     sessionManager.removeListener('session_ended', onSessionEnded)
     console.log(`[Webhook] Session ${sessionId} ended (${reason})`)
@@ -161,19 +172,25 @@ export async function POST(request: Request) {
 
       // Into the thread the bot opened, or as a reply to the original message
       const target = threadId || channelId
-      fetch(`https://discord.com/api/v10/channels/${target}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bot ${discordBotToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: replyContent,
-          ...(threadId ? {} : { message_reference: { message_id: messageId } }),
-        }),
-      })
-        .then(() => console.log(`[Webhook] Discord reply sent for session ${sessionId}`))
-        .catch(err => console.error(`[Webhook] Discord reply failed:`, err))
+      // The nonce is this run's: a retry after a lost answer cannot post the report twice.
+      const posted = await postDiscordMessage(discordBotToken, target, replyContent, threadId ? undefined : messageId, undefined, nonceFor(`${sessionId}:${messageId}`))
+      if (!posted) {
+        console.error(`[Webhook] Discord reply failed for session ${sessionId}`)
+      } else {
+        console.log(`[Webhook] Discord reply sent for session ${sessionId}`)
+        // A report that asks Chip for something, or says the run broke, also lands in his inbox.
+        // Not for the inbox's own threads: that answer is already in front of him.
+        if (!isInbox) {
+          await mirrorPostToInbox({
+            sourceChannelId: channelId,
+            sourceThreadId: threadId || undefined,
+            sourceMessageId: posted,
+            text: failure.failed ? `Run failed: ${failure.reason.slice(0, 200)}` : summary,
+            agent: label,
+            sessionId,
+          })
+        }
+      }
     }
 
     // Also call external callback if provided. `replied` tells the bot the

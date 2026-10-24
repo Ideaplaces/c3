@@ -1,0 +1,76 @@
+[
+  {
+    "name": "one ask on the first line",
+    "text": "Needs from you: approve [eli-kpi#39](https://github.com/eli-health/eli-kpi/pull/39)? I recommend yes.\n\nSession: 0b1c2d3e-0000-4000-8000-000000000000",
+    "chipAsks": [
+      "approve [eli-kpi#39](https://github.com/eli-health/eli-kpi/pull/39)? I recommend yes."
+    ],
+    "surfaces": true
+  },
+  {
+    "name": "a title line above a bold ask",
+    "text": "**Plusgrade Slack, Fri Oct 23**\n**Needs from you:** 2 new.\n1. Oleg wants the IA ticket for Monday. Reply.\n2. Thomas Lee asks for the SSO diagram. Reply.\n\nDetail in the thread.",
+    "chipAsks": [
+      "2 new.",
+      "Oleg wants the IA ticket for Monday. Reply.",
+      "Thomas Lee asks for the SSO diagram. Reply."
+    ],
+    "surfaces": true
+  },
+  {
+    "name": "a bare ask with its list under it",
+    "text": "Needs from you:\n- Merge #12? I recommend yes.\n- Merge #11? I recommend yes.",
+    "chipAsks": [
+      "Merge #12? I recommend yes.",
+      "Merge #11? I recommend yes."
+    ],
+    "surfaces": true
+  },
+  {
+    "name": "a bare ask with a blank line before its list",
+    "text": "Needs from you:\n\n1. Merge #12? yes.\n2. Deploy?",
+    "chipAsks": [
+      "Merge #12? yes.",
+      "Deploy?"
+    ],
+    "surfaces": true
+  },
+  {
+    "name": "an ask that starts with None",
+    "text": "Needs from you: None of the three builds pass. Which do I revert?",
+    "chipAsks": [
+      "None of the three builds pass. Which do I revert?"
+    ],
+    "surfaces": true
+  },
+  {
+    "name": "Luca's ask stays out of Chip's inbox",
+    "text": "Needs Luca: free 30 GB on lucadev.",
+    "chipAsks": [],
+    "surfaces": true
+  },
+  {
+    "name": "nothing needed is not an ask",
+    "text": "Needs from you: nothing. Merged #1094.",
+    "chipAsks": [],
+    "surfaces": false
+  },
+  {
+    "name": "a report with no ask",
+    "text": "Merged #1094 and #1095. All green.",
+    "chipAsks": [],
+    "surfaces": false
+  },
+  {
+    "name": "nothing new, with older items still open",
+    "text": "**Plusgrade Slack, Sun Oct 18**\nNeeds from you: nothing new, 9 still open from earlier.",
+    "chipAsks": [],
+    "surfaces": false
+  },
+  {
+    "name": "none at the moment",
+    "text": "Needs from you: none at the moment.",
+    "chipAsks": [],
+    "surfaces": false
+  }
+]

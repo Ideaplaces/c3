@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-const { startSession, resumeSession, isSessionActive, getSession, getChannelTrigger, runPrecheck, getSessionJSONLPath, sessionEvents, runEvents } = vi.hoisted(() => ({
+const { startSession, resumeSession, isSessionActive, getSession, getChannelTrigger, runPrecheck, getSessionJSONLPath, sessionEvents, runEvents, getInboxConfig, mirrorPostToInbox } = vi.hoisted(() => ({
   sessionEvents: new (require('events').EventEmitter)(),
   runEvents: { current: [] as unknown[] },
   getSessionJSONLPath: vi.fn(),
@@ -13,6 +13,8 @@ const { startSession, resumeSession, isSessionActive, getSession, getChannelTrig
   getSession: vi.fn(),
   getChannelTrigger: vi.fn(),
   runPrecheck: vi.fn(),
+  getInboxConfig: vi.fn(),
+  mirrorPostToInbox: vi.fn(),
 }))
 vi.mock('@/lib/sdk/session-manager', () => ({
   sessionManager: {
@@ -30,9 +32,12 @@ vi.mock('@/lib/triggers/precheck', () => ({ runPrecheck }))
 vi.mock('@/lib/usage', () => ({ recordSkippedRun: vi.fn() }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
 vi.mock('@/lib/triggers/config', () => ({ getChannelTrigger, loadPromptTemplate: () => 'rendered prompt' }))
+vi.mock('@/lib/inbox/config', () => ({ getInboxConfig }))
+vi.mock('@/lib/inbox/discord', () => ({ mirrorPostToInbox }))
 
 import { POST } from '@/app/api/webhooks/discord/route'
-import { sessionForThread, followUpPrompt } from '@/lib/webhooks/discord-threads'
+import { sessionForThread, followUpPrompt, linkThread } from '@/lib/webhooks/discord-threads'
+import { getItem, saveItem } from '@/lib/inbox/store'
 
 const fan = { name: 'superfan-tour-calls', channelId: 'C1', prompt: 'superfan-chat.md', projectPath: '/p', permissionMode: 'bypassPermissions', model: 'm', thread: true, maxDurationMs: 1000 }
 
@@ -59,6 +64,7 @@ describe('discord webhook: a thread is one session', () => {
     runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
     runEvents.current = []
     sessionEvents.removeAllListeners()
+    getInboxConfig.mockReturnValue(null)
   })
   afterEach(() => {
     delete process.env.C3_DISCORD_THREADS_FILE
@@ -213,5 +219,81 @@ describe('discord-threads store', () => {
     expect(sessionForThread('EDGE', file)).toBeNull()
     expect(sessionForThread('MID', file)?.sessionId).toBe('S1')
     expect(sessionForThread('NEW', file)?.sessionId).toBe('S2')
+  })
+})
+
+describe('discord webhook: the #needs-chip inbox', () => {
+  const inboxTrigger = { ...fan, name: 'needs-chip', channelId: 'INBOX' }
+  let dir: string
+  let realFetch: typeof fetch
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionEvents.removeAllListeners()
+    process.env.CCC_WEBHOOK_SECRET = 'test-secret'
+    process.env.DISCORD_BOT_TOKEN = 'tok'
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inbox-route-'))
+    process.env.C3_DISCORD_THREADS_FILE = path.join(dir, 'threads.json')
+    process.env.C3_INBOX_FILE = path.join(dir, 'needs-chip.json')
+    getInboxConfig.mockReturnValue({ channelId: 'INBOX', guildId: 'G', trigger: 'needs-chip', skipChannelIds: [] })
+    isSessionActive.mockReturnValue(false)
+    getSession.mockReturnValue({ id: 'CRON1' })
+    getSessionJSONLPath.mockReturnValue('/x/CRON1.jsonl')
+    runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
+    realFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ id: 'REPLY1' }))) as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.DISCORD_BOT_TOKEN
+    delete process.env.C3_INBOX_FILE
+    delete process.env.C3_DISCORD_THREADS_FILE
+  })
+
+  it('resumes the session that asked when Chip answers in the inbox thread, and marks the item answered', async () => {
+    getChannelTrigger.mockReturnValue(inboxTrigger)
+    linkThread('L1', 'CRON1', 'needs-chip')
+    saveItem({ sourceKey: 'M1', askKeys: ['k'], status: 'open', channelName: 'plusgrade', createdAt: new Date().toISOString(), inboxMessageId: 'L1', sessionId: 'CRON1' })
+    const res = await post({ channelId: 'INBOX', message: 'composed', threadId: 'L1', followUp: 'yes, merge it', messageId: 'R1' })
+    expect(await res.json()).toMatchObject({ status: 'resumed', sessionId: 'CRON1' })
+    expect(resumeSession.mock.calls[0][0]).toBe('CRON1')
+    expect(resumeSession.mock.calls[0][1]).toContain('yes, merge it')
+    expect(getItem('M1')?.status).toBe('answered')
+  })
+
+  it('copies a finished report that asks Chip into the inbox, with the id of the posted reply', async () => {
+    getChannelTrigger.mockReturnValue(fan)
+    startSession.mockResolvedValue('S7')
+    await post({ message: 'how were calls?', threadId: 'T1' })
+    runEvents.current = [{ message: { type: 'assistant', message: { content: [{ type: 'text', text: 'Needs from you: add per-step timing?' }] } } }]
+    sessionEvents.emit('session_ended', 'S7', 'completed')
+    await new Promise(r => setTimeout(r, 10))
+    expect(mirrorPostToInbox).toHaveBeenCalledWith({
+      sourceChannelId: 'C1', sourceThreadId: 'T1', sourceMessageId: 'REPLY1',
+      text: 'Needs from you: add per-step timing?', agent: 'discord:superfan-tour-calls', sessionId: 'S7',
+    })
+    const sent = JSON.parse(String((globalThis.fetch as unknown as { mock: { calls: [unknown, { body: string }][] } }).mock.calls[0][1].body))
+    expect(sent).toMatchObject({ enforce_nonce: true })
+    expect(String(sent.nonce)).toHaveLength(24)
+  })
+
+  it('copies a session that died as a failed run', async () => {
+    getChannelTrigger.mockReturnValue(fan)
+    startSession.mockResolvedValue('S9')
+    await post({ message: 'q', threadId: 'T1' })
+    runEvents.current = []
+    sessionEvents.emit('session_ended', 'S9', 'crashed: out of memory')
+    await new Promise(r => setTimeout(r, 10))
+    expect(mirrorPostToInbox.mock.calls[0][0].text).toBe('Run failed: crashed: out of memory')
+  })
+
+  it('never copies the answer given in an inbox thread back into the inbox', async () => {
+    getChannelTrigger.mockReturnValue(inboxTrigger)
+    startSession.mockResolvedValue('S8')
+    await post({ channelId: 'INBOX', message: 'q', threadId: 'L9' })
+    runEvents.current = [{ message: { type: 'assistant', message: { content: [{ type: 'text', text: 'Needs from you: one more thing?' }] } } }]
+    sessionEvents.emit('session_ended', 'S8', 'completed')
+    await new Promise(r => setTimeout(r, 10))
+    expect(globalThis.fetch).toHaveBeenCalled()
+    expect(mirrorPostToInbox).not.toHaveBeenCalled()
   })
 })

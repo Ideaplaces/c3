@@ -16,6 +16,7 @@ import {
   formatInvestigationReply,
   postDiscordChunked,
 } from '@/lib/webhooks/discord-mirror'
+import { mirrorPostToInbox } from '@/lib/inbox/discord'
 
 /** How much of the agent's report is carried into Discord, split across messages. */
 const DISCORD_REPORT_LIMIT = 6000
@@ -237,6 +238,13 @@ export async function POST(request: Request) {
             `[Slack Webhook] Posted report to Discord ${discordChannelId} for ${sessionId}` +
             ` (failed=${failure.failed})`,
           )
+          await mirrorPostToInbox({
+            sourceChannelId: discordChannelId as string,
+            sourceMessageId: posted,
+            text: failure.failed ? `Run failed: ${failure.reason.slice(0, 200)}` : body,
+            agent: `slack:${trigger.name}`,
+            sessionId,
+          })
           return
         }
         // Degraded path only. Discord is the destination; a DM beats losing the
