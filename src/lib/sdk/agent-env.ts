@@ -10,6 +10,9 @@
  * a resume). The inherited variables cannot: the server keeps a CLI session's environment when it
  * is restarted from one. The Discord poster gates only these runs, posting an ask or a failed run
  * and nothing else (2026-10-18); a person's message must never be dropped by it.
+ *
+ * C3_TRIGGER_NAME is the session's label (`cron:plusgrade-pr-review`), so a post an agent makes
+ * can say which agent made it: the #needs-chip inbox shows it beside the ask.
  */
 export function agentEnv(base: Record<string, string | undefined>, sessionId: string, label?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...base }
@@ -18,6 +21,8 @@ export function agentEnv(base: Record<string, string | undefined>, sessionId: st
   delete env.SLACK_BOT_TOKEN
   delete env.DISCORD_BOT_TOKEN
   delete env.C3_TRIGGER_SESSION_ID
+  delete env.C3_TRIGGER_NAME
+  if (label) env.C3_TRIGGER_NAME = label
   if (label && /^(cron|slack):/.test(label)) env.C3_TRIGGER_SESSION_ID = sessionId
   return env
 }
