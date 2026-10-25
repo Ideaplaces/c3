@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 /**
  * A trigger can run after another one (`after` in triggers.json), so the
@@ -7,8 +7,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * agent read another's half-finished work. Chip, 2026-10-24.
  */
 
-const { startSession, runningSessionWithLabel, runPrecheck, runPostcheck, recordSkippedRun, sessionEvents, triggers, statuses, dependentsBroken } = vi.hoisted(() => ({
+const { startSession, runningSessionWithLabel, runPrecheck, runPostcheck, recordSkippedRun, sessionEvents, triggers, statuses, dependentsBroken, turns } = vi.hoisted(() => ({
   dependentsBroken: { current: false },
+  turns: new Map<string, Date>(),
   runPostcheck: vi.fn().mockResolvedValue(undefined),
   statuses: new Map<string, string>(),
   sessionEvents: new (require('events').EventEmitter)(),
@@ -22,6 +23,10 @@ vi.mock('@/lib/triggers/precheck', () => ({ runPrecheck }))
 vi.mock('@/lib/triggers/postcheck', () => ({ runPostcheck }))
 vi.mock('@/lib/usage', () => ({ recordSkippedRun }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
+vi.mock('@/lib/triggers/chain-turns', () => ({
+  lastChainTurn: (name: string) => turns.get(name) ?? null,
+  recordChainTurn: (name: string, at: Date) => turns.set(name, at),
+}))
 vi.mock('@/lib/store/sessions', () => ({ getSession: (id: string) => (statuses.has(id) ? { status: statuses.get(id) } : null) }))
 vi.mock('@/lib/sdk/session-manager', () => ({
   sessionManager: {
@@ -69,6 +74,7 @@ describe('chaining triggers on completion', () => {
     vi.clearAllMocks()
     sessionEvents.removeAllListeners()
     statuses.clear()
+    turns.clear()
     runningSessionWithLabel.mockReturnValue(null)
     runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: 'work' })
     triggers.current = {
@@ -176,6 +182,7 @@ describe('chain edges', () => {
     vi.clearAllMocks()
     sessionEvents.removeAllListeners()
     statuses.clear()
+    turns.clear()
     runningSessionWithLabel.mockReturnValue(null)
     runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: 'work' })
   })
@@ -238,6 +245,94 @@ describe('chain edges', () => {
     expect(runPostcheck).toHaveBeenCalledOnce()
     expect(runPostcheck.mock.calls[0][3]).toMatchObject({ endReason: 'stalled' })
     expect(started()).toEqual(['cron:judge'])
+  })
+})
+
+describe('the fallback clock of a chained trigger', () => {
+  // Saturday 2026-10-24, Eastern: the chain runs from 05:15, help's fallback is 06:30.
+  const at = (iso: string) => vi.setSystemTime(new Date(iso))
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    sessionEvents.removeAllListeners()
+    statuses.clear()
+    turns.clear()
+    runningSessionWithLabel.mockReturnValue(null)
+    runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: 'work' })
+    triggers.current = {
+      'spec-keeper': { schedule: '15 5 * * *', precheck: 'p' },
+      help: { schedule: '30 6 * * *', precheck: 'p', after: ['spec-keeper'] },
+    }
+  })
+  afterEach(() => vi.useRealTimers())
+
+  async function chainReachesHelp(helpEnds: string) {
+    at('2026-10-24T09:15:00Z')
+    await fireCronTrigger('spec-keeper', { kind: 'clock', chain: [] })
+    at('2026-10-24T09:20:00Z')
+    end('completed')
+    await flush()
+    at('2026-10-24T09:38:00Z')
+    end(helpEnds)
+    await flush()
+  }
+
+  it('skips the tick when the chain already got the trigger through its turn, so it does not re-read the chain\'s own commits', async () => {
+    await chainReachesHelp('completed')
+    at('2026-10-24T10:30:10Z')
+    const res = await fireCronTrigger('help', { kind: 'clock', chain: [], schedule: '30 6 * * *' })
+    expect(res.body.status).toBe('skipped')
+    expect(runPrecheck).toHaveBeenCalledTimes(2)
+    expect(started()).toEqual(['cron:spec-keeper', 'cron:help'])
+  })
+
+  it('runs the tick when the chain-fired run failed, which is what the fallback is for', async () => {
+    await chainReachesHelp('error')
+    at('2026-10-24T10:30:10Z')
+    await fireCronTrigger('help', { kind: 'clock', chain: [], schedule: '30 6 * * *' })
+    expect(started()).toEqual(['cron:spec-keeper', 'cron:help', 'cron:help'])
+  })
+
+  it('runs the tick when the chain last reached the trigger before its previous tick', async () => {
+    turns.set('help', new Date('2026-10-23T09:20:00Z'))
+    at('2026-10-24T10:30:10Z')
+    await fireCronTrigger('help', { kind: 'clock', chain: [], schedule: '30 6 * * *' })
+    expect(started()).toEqual(['cron:help'])
+  })
+
+  it('runs the fallback of a schedule that has not come round in eight days, whatever turn is recorded', async () => {
+    triggers.current = { monthly: { schedule: '0 9 1 * *', after: ['x'] } }
+    turns.set('monthly', new Date('2026-10-20T12:00:00Z'))
+    at('2026-11-01T14:00:05Z')
+    await fireCronTrigger('monthly', { kind: 'clock', chain: [], timestamp: '2026-11-01T14:00:05Z' })
+    expect(started()).toEqual(['cron:monthly'])
+  })
+
+  it('skips only the tick right after the chain on a fifteen-minute schedule', async () => {
+    triggers.current = { translate: { schedule: '*/15 * * * *', after: ['judge'] } }
+    turns.set('translate', new Date('2026-10-24T09:57:00Z'))
+    at('2026-10-24T10:00:20Z')
+    expect((await fireCronTrigger('translate', { kind: 'clock', chain: [], timestamp: '2026-10-24T10:00:20Z' })).body.status).toBe('skipped')
+    at('2026-10-24T10:15:20Z')
+    expect((await fireCronTrigger('translate', { kind: 'clock', chain: [], timestamp: '2026-10-24T10:15:20Z' })).body.status).toBe('started')
+  })
+
+  it('measures from the tick the scheduler matched, even when the request arrives a minute late', async () => {
+    await chainReachesHelp('completed')
+    at('2026-10-24T10:31:10Z')
+    const res = await fireCronTrigger('help', { kind: 'clock', chain: [], timestamp: '2026-10-24T10:30:25Z' })
+    expect(res.body.status).toBe('skipped')
+  })
+
+  it('counts a chain fire whose precheck found nothing to do as the turn', async () => {
+    runPrecheck.mockResolvedValueOnce({ proceed: true, exitCode: 0, reason: 'work' }).mockResolvedValueOnce({ proceed: false, exitCode: 3, reason: 'unchanged' })
+    at('2026-10-24T09:15:00Z')
+    await fireCronTrigger('spec-keeper', { kind: 'clock', chain: [] })
+    at('2026-10-24T09:20:00Z')
+    end('completed')
+    await flush()
+    expect(turns.get('help')?.toISOString()).toBe('2026-10-24T09:20:00.000Z')
   })
 })
 

@@ -6,6 +6,8 @@ import { runPrecheck } from '@/lib/triggers/precheck'
 import { runPostcheck } from '@/lib/triggers/postcheck'
 import { recordSkippedRun } from '@/lib/usage'
 import { getSession } from '@/lib/store/sessions'
+import { previousOccurrence } from '@/lib/triggers/cron'
+import { lastChainTurn, recordChainTurn } from '@/lib/triggers/chain-turns'
 
 /**
  * How a run was started: by its own schedule, or by the end of a trigger it
@@ -42,6 +44,7 @@ export async function fireCronTrigger(name: string, cause: FireCause): Promise<F
   }
 
   const label = `cron:${trigger.name}`
+  const firedAt = new Date()
   const via = cause.kind === 'chain' ? `after ${cause.chain[cause.chain.length - 1]}` : `schedule: ${cause.schedule}`
   console.log(`[Cron] Trigger "${trigger.name}" fired (${via})`)
 
@@ -50,6 +53,29 @@ export async function fireCronTrigger(name: string, cause: FireCause): Promise<F
     console.error(`[Cron] Refused "${trigger.name}": ${reason}`)
     recordSkippedRun(label, trigger.projectPath, reason)
     return { status: 409, body: { trigger: trigger.name, status: 'refused', reason } }
+  }
+
+  // A trigger that runs after others keeps its schedule only as the fallback
+  // for a chain that broke. When the chain already gave it its turn since its
+  // clock last came round, the tick has nothing to make up for, and running it
+  // would only re-read what the chain's own links committed meanwhile (on
+  // 2026-10-24 the 06:30 help tick re-ran a full help and judge an hour after
+  // the chain had done both).
+  if (cause.kind === 'clock' && trigger.after?.length) {
+    // Measured from the tick the scheduler matched, not from when the request
+    // arrived: the scheduler fires one trigger after another, so a tick can
+    // reach C3 a minute late, where "strictly before now" would be the tick itself.
+    const tick = tickTime(cause.timestamp) ?? firedAt
+    const turn = lastChainTurn(trigger.name)
+    // A schedule that has not come round in the lookback cannot say what the
+    // turn would cover, so its fallback runs.
+    const previous = turn ? previousOccurrence(trigger.schedule, tick) : null
+    if (turn && previous && turn > previous) {
+      const reason = `the chain already ran it at ${turn.toISOString()}`
+      console.log(`[Cron] Fallback skipped "${trigger.name}": ${reason}`)
+      recordSkippedRun(label, trigger.projectPath, reason)
+      return { status: 200, body: { trigger: trigger.name, status: 'skipped', reason } }
+    }
   }
 
   // One driver per trigger. A run that is still going owns the trigger's
@@ -66,7 +92,7 @@ export async function fireCronTrigger(name: string, cause: FireCause): Promise<F
 
   firing.add(label)
   try {
-    return await startRun(trigger, label, cause)
+    return await startRun(trigger, label, cause, firedAt)
   } finally {
     firing.delete(label)
   }
@@ -76,6 +102,7 @@ async function startRun(
   trigger: NonNullable<ReturnType<typeof getCronTrigger>>,
   label: string,
   cause: FireCause,
+  firedAt: Date,
 ): Promise<FireResult> {
   if (trigger.precheck) {
     const check = await runPrecheck(trigger.precheck, trigger.projectPath)
@@ -86,6 +113,7 @@ async function startRun(
       // final as it will get. Except on a dependent's own fallback tick, which
       // would otherwise wake the rest of the chain every time it found nothing
       // (tour-translate ticks every fifteen minutes).
+      if (cause.kind === 'chain') noteChainTurn(trigger.name, firedAt)
       if (cause.kind === 'chain' || !trigger.after?.length) followOn(trigger.name, cause)
       return { status: 200, body: { trigger: trigger.name, status: 'skipped', reason: check.reason } }
     }
@@ -129,7 +157,10 @@ async function startRun(
     // generator normally, but with an error result, and a stalled, stopped or
     // over-time run may have left its work half written. Those wait for the
     // next link's clock.
-    if (getSession(sessionId)?.status === 'completed') followOn(trigger.name, cause)
+    if (getSession(sessionId)?.status === 'completed') {
+      if (cause.kind === 'chain') noteChainTurn(trigger.name, firedAt)
+      followOn(trigger.name, cause)
+    }
   })
 
   try {
@@ -161,6 +192,24 @@ function watchForEnding(sessionId: string, onEnd: (reason: string) => void): () 
   }
   sessionManager.on('session_ended', onEnded)
   return () => sessionManager.removeListener('session_ended', onEnded)
+}
+
+function tickTime(timestamp: string | undefined): Date | null {
+  if (!timestamp) return null
+  const t = Date.parse(timestamp)
+  if (Number.isNaN(t)) return null
+  return new Date(Math.floor(t / 60_000) * 60_000)
+}
+
+// A turn is the chain's fire time, not the run's end, so a run that outlasts
+// its own next tick still counts for it. Never throws: it can run inside the
+// session manager's session_ended emit.
+function noteChainTurn(name: string, firedAt: Date): void {
+  try {
+    recordChainTurn(name, firedAt)
+  } catch (err) {
+    console.error(`[Cron] Could not record the chain turn of "${name}":`, err)
+  }
 }
 
 // Runs inside the session manager's session_ended emit, so nothing may throw out
