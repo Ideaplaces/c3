@@ -1,4 +1,5 @@
 import { execFile } from 'child_process'
+import { existsSync } from 'fs'
 
 export interface PrecheckResult {
   proceed: boolean
@@ -43,13 +44,22 @@ export function runPrecheck(
   cwd: string,
   env: Record<string, string> = {},
 ): Promise<PrecheckResult> {
+  const home = process.env.HOME || '/'
+  const projectDir = cwd.replace(/^~/, home)
+  // A gate may be the thing that creates its project folder (a worktree made on
+  // first use). Spawning into a folder that does not exist fails as "spawn bash
+  // ENOENT" before the gate runs: outbound-review's first run, 2026-10-26.
+  const runDir = existsSync(projectDir) ? projectDir : home
+  if (runDir !== projectDir) {
+    console.error(`[Precheck] project folder ${projectDir} does not exist yet; running the gate from ${home}`)
+  }
   return new Promise((resolve) => {
     const startedAt = Date.now()
     execFile(
       'bash',
       ['-lc', command],
       {
-        cwd: cwd.replace(/^~/, process.env.HOME || ''),
+        cwd: runDir,
         timeout: PRECHECK_TIMEOUT_MS,
         maxBuffer: 1 << 20,
         env: { ...process.env, ...env },
