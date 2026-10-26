@@ -1,3 +1,4 @@
+import fs from 'fs'
 import { describe, it, expect, vi } from 'vitest'
 import { runPrecheck, PRECHECK_NOTHING_TO_DO } from './precheck.js'
 
@@ -28,6 +29,23 @@ describe('runPrecheck protocol', () => {
     const r = await runPrecheck('definitely-not-a-real-binary-xyz --check', '/tmp')
     expect(r.proceed).toBe(true)
     expect(r.broken).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('a gate runs in its project folder', async () => {
+    const r = await runPrecheck('pwd', '/tmp')
+    expect(r.reason).toBe('/tmp')
+  })
+
+  it('a gate whose project folder does not exist yet runs from HOME, so it can create it', async () => {
+    const dir = `/tmp/c3-precheck-missing-${process.pid}-${Date.now()}`
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = await runPrecheck(`mkdir -p "${dir}" && pwd`, dir)
+    const existed = fs.existsSync(dir)
+    fs.rmSync(dir, { recursive: true, force: true })
+    expect(r).toEqual({ proceed: true, exitCode: 0, reason: process.env.HOME })
+    expect(existed).toBe(true)
+    expect(spy.mock.calls[0][0]).toContain(`${dir} does not exist yet`)
     spy.mockRestore()
   })
 
