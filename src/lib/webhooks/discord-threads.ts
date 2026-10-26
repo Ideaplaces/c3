@@ -60,3 +60,30 @@ export function followUpPrompt(author: string, message: string): string {
     'short. Do not post to Discord yourself, and do not start new work they did not ask for.',
   ].join('\n')
 }
+
+/**
+ * A thread a webhook started (a CI red, an alert: nobody asked a question) whose run ended with
+ * nothing for Chip is archived, so it drops out of the sidebar (Chip, 2026-10-26: "I only want
+ * the errors that require my attention"). Only a report the inbox read and found no ask in
+ * (`no-ask`) qualifies: a failed run, an ask, a channel Chip reads directly, the inbox's own
+ * threads and a thread a person started stay open. A reply in an archived thread reopens it.
+ */
+export function shouldArchiveThread(opts: { threadId?: string; webhookTrigger: boolean; isInbox: boolean; failed: boolean; mirror?: { status: string } | null }): boolean {
+  return Boolean(opts.threadId) && opts.webhookTrigger && !opts.isInbox && !opts.failed && opts.mirror?.status === 'no-ask'
+}
+
+/** Archiving is tidying: a failure is logged and never thrown, the report has already landed. */
+export async function archiveThread(token: string, threadId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://discord.com/api/v10/channels/${threadId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: true }),
+    })
+    if (!res.ok) console.error(`[Webhook] Archiving thread ${threadId} failed: ${res.status}`)
+    return res.ok
+  } catch (err) {
+    console.error(`[Webhook] Archiving thread ${threadId} failed:`, err)
+    return false
+  }
+}

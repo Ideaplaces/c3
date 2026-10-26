@@ -297,3 +297,86 @@ describe('discord webhook: the #needs-chip inbox', () => {
     expect(mirrorPostToInbox).not.toHaveBeenCalled()
   })
 })
+
+describe('discord webhook: a thread whose run needs nothing from Chip is archived', () => {
+  const ciRed = { ...fan, name: 'tour-ci-red', webhookId: 'W1' }
+  let dir: string
+  let realFetch: typeof fetch
+  let calls: { url: string; method: string; body: string }[]
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionEvents.removeAllListeners()
+    process.env.CCC_WEBHOOK_SECRET = 'test-secret'
+    process.env.DISCORD_BOT_TOKEN = 'tok'
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-route-'))
+    process.env.C3_DISCORD_THREADS_FILE = path.join(dir, 'threads.json')
+    getChannelTrigger.mockReturnValue(ciRed)
+    getInboxConfig.mockReturnValue({ channelId: 'INBOX', guildId: 'G', trigger: 'needs-chip', skipChannelIds: [] })
+    runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
+    startSession.mockResolvedValue('S1')
+    calls = []
+    realFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (u: unknown, init?: { method?: string; body?: string }) => {
+      calls.push({ url: String(u), method: init?.method ?? 'GET', body: String(init?.body ?? '') })
+      return new Response(JSON.stringify({ id: 'REPLY1' }))
+    }) as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.DISCORD_BOT_TOKEN
+    delete process.env.C3_DISCORD_THREADS_FILE
+  })
+
+  async function finish(reason: string, text: string, mirror: unknown, body: Record<string, unknown> = {}) {
+    mirrorPostToInbox.mockResolvedValue(mirror)
+    await post({ message: 'red run', threadId: 'T1', ...body })
+    runEvents.current = text ? [{ message: { type: 'assistant', message: { content: [{ type: 'text', text }] } } }] : []
+    sessionEvents.emit('session_ended', 'S1', reason)
+    await new Promise(r => setTimeout(r, 10))
+    return calls.filter(c => c.method === 'PATCH')
+  }
+
+  it('archives the thread after the report when the run asked nothing and did not fail', async () => {
+    const patches = await finish('completed', 'Flaky test, fix PR opened with auto-merge.', { status: 'no-ask' })
+    expect(patches).toEqual([{ url: 'https://discord.com/api/v10/channels/T1', method: 'PATCH', body: JSON.stringify({ archived: true }) }])
+    expect(calls.findIndex(c => c.method === 'POST')).toBeLessThan(calls.findIndex(c => c.method === 'PATCH'))
+  })
+
+  it('keeps the thread open when the report asks Chip', async () => {
+    expect(await finish('completed', 'Needs from you: merge it?', { status: 'posted', inboxMessageId: 'L1' })).toEqual([])
+  })
+
+  it('keeps the thread open when the run failed', async () => {
+    expect(await finish('crashed: stalled', '', { status: 'no-ask' })).toEqual([])
+  })
+
+  it('keeps the thread open in a channel Chip reads directly', async () => {
+    expect(await finish('completed', 'Done.', { status: 'skipped', reason: 'channel Chip reads directly' })).toEqual([])
+  })
+
+  it('keeps an inbox thread open', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, name: 'needs-chip', channelId: 'INBOX' })
+    expect(await finish('completed', 'Done.', { status: 'no-ask' }, { channelId: 'INBOX' })).toEqual([])
+  })
+
+  it('keeps a thread a person started open: their answer is for them', async () => {
+    getChannelTrigger.mockReturnValue(fan)
+    expect(await finish('completed', 'Last month: 31 calls.', { status: 'no-ask' })).toEqual([])
+  })
+
+  it('keeps the thread open when the archive call fails, after logging it', async () => {
+    globalThis.fetch = vi.fn(async (u: unknown, init?: { method?: string; body?: string }) => {
+      calls.push({ url: String(u), method: init?.method ?? 'GET', body: String(init?.body ?? '') })
+      return init?.method === 'PATCH' ? new Response('{}', { status: 403 }) : new Response(JSON.stringify({ id: 'REPLY1' }))
+    }) as typeof fetch
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(await finish('completed', 'Done.', { status: 'no-ask' })).toHaveLength(1)
+    expect(err).toHaveBeenCalledWith('[Webhook] Archiving thread T1 failed: 403')
+    err.mockRestore()
+  })
+
+  it('never archives a channel message that has no thread', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, thread: undefined })
+    expect(await finish('completed', 'Done.', { status: 'no-ask' }, { threadId: undefined })).toEqual([])
+  })
+})

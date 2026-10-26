@@ -4,7 +4,7 @@ import { recordSkippedRun } from '@/lib/usage'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
-import { followUpPrompt, linkThread, sessionForThread } from '@/lib/webhooks/discord-threads'
+import { archiveThread, followUpPrompt, linkThread, sessionForThread, shouldArchiveThread } from '@/lib/webhooks/discord-threads'
 import { getSession } from '@/lib/store/sessions'
 import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
 import { postDiscordMessage } from '@/lib/webhooks/discord-mirror'
@@ -180,15 +180,18 @@ export async function POST(request: Request) {
         console.log(`[Webhook] Discord reply sent for session ${sessionId}`)
         // A report that asks Chip for something, or says the run broke, also lands in his inbox.
         // Not for the inbox's own threads: that answer is already in front of him.
-        if (!isInbox) {
-          await mirrorPostToInbox({
-            sourceChannelId: channelId,
-            sourceThreadId: threadId || undefined,
-            sourceMessageId: posted,
-            text: failure.failed ? `Run failed: ${failure.reason.slice(0, 200)}` : summary,
-            agent: label,
-            sessionId,
-          })
+        const mirror = isInbox
+          ? null
+          : await mirrorPostToInbox({
+              sourceChannelId: channelId,
+              sourceThreadId: threadId || undefined,
+              sourceMessageId: posted,
+              text: failure.failed ? `Run failed: ${failure.reason.slice(0, 200)}` : summary,
+              agent: label,
+              sessionId,
+            })
+        if (threadId && shouldArchiveThread({ threadId, webhookTrigger: Boolean(trigger.webhookId), isInbox, failed: failure.failed, mirror })) {
+          await archiveThread(discordBotToken, threadId)
         }
       }
     }
