@@ -375,6 +375,42 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
     err.mockRestore()
   })
 
+  it('archives the empty thread of a webhook post the precheck skipped', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, precheck: 'seen' })
+    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'already handled' })
+    const res = await post({ message: 'red run', threadId: 'T1', threadCreated: true })
+    expect((await res.json()).status).toBe('skipped')
+    expect(calls).toEqual([{ url: 'https://discord.com/api/v10/channels/T1', method: 'PATCH', body: JSON.stringify({ archived: true }) }])
+  })
+
+  it('leaves a reused thread alone when its replayed post is skipped: it holds the earlier report', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, precheck: 'seen' })
+    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'already handled' })
+    await post({ message: 'red run', threadId: 'T1', threadCreated: false })
+    expect(calls).toEqual([])
+  })
+
+  it('leaves an inbox thread alone on a skip', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, name: 'needs-chip', channelId: 'INBOX', precheck: 'seen' })
+    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'nothing' })
+    await post({ channelId: 'INBOX', message: 'x', threadId: 'T1', threadCreated: true })
+    expect(calls).toEqual([])
+  })
+
+  it('leaves the thread open when a skipped message is a reply in it', async () => {
+    getChannelTrigger.mockReturnValue({ ...ciRed, precheck: 'seen' })
+    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'already handled' })
+    await post({ message: 'composed', threadId: 'T1', threadCreated: true, followUp: 'why did it fail?' })
+    expect(calls).toEqual([])
+  })
+
+  it('leaves a skipped thread open when a person started it', async () => {
+    getChannelTrigger.mockReturnValue({ ...fan, precheck: 'budget' })
+    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'over budget' })
+    await post({ message: 'how were calls?', threadId: 'T1', threadCreated: true })
+    expect(calls).toEqual([])
+  })
+
   it('never archives a channel message that has no thread', async () => {
     getChannelTrigger.mockReturnValue({ ...ciRed, thread: undefined })
     expect(await finish('completed', 'Done.', { status: 'no-ask' }, { threadId: undefined })).toEqual([])

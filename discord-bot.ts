@@ -173,6 +173,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   await react(msg, '👀')
 
   let threadId: string | undefined
+  let threadCreated = false
   if (trigger.thread) {
     try {
       const existing = subject.thread ?? (subject.hasThread ? await subject.channel.messages.fetch(subject.id).then(m => m.thread) : null)
@@ -181,12 +182,13 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
         autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays,
       })
       threadId = thread.id
+      threadCreated = !existing
     } catch (err) {
       console.error(`[Bot] Could not open a thread on ${subject.id}, replying in channel instead:`, err)
     }
   }
 
-  return startSession(msg, trigger, text, subject.id, threadId, true)
+  return startSession(msg, trigger, text, subject.id, threadId, true, undefined, threadCreated)
 }
 
 /**
@@ -194,7 +196,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
  * what gets the eyes or the cross; `subjectId` and `threadId` are where the
  * answer is posted.
  */
-async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean, followUp?: string) {
+async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean, followUp?: string, threadCreated = false) {
   try {
     const response = await fetch(`${CCC_URL}/api/webhooks/discord`, {
       method: 'POST',
@@ -208,6 +210,7 @@ async function startSession(msg: Message, trigger: BotChannelTrigger, text: stri
         author: msg.author.username,
         messageId: subjectId,
         threadId,
+        threadCreated,
         followUp,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),

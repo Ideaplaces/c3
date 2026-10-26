@@ -28,8 +28,8 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { channelId, message, author, messageId, threadId, followUp } = body as {
-    channelId?: string; message?: string; author?: string; messageId?: string; threadId?: string
+  const { channelId, message, author, messageId, threadId, threadCreated, followUp } = body as {
+    channelId?: string; message?: string; author?: string; messageId?: string; threadId?: string; threadCreated?: boolean
     callbackUrl?: string
     /** A reply inside a thread: the person's new message alone, for resuming the thread's session. */
     followUp?: string
@@ -82,6 +82,10 @@ export async function POST(request: Request) {
     if (!check.proceed) {
       console.log(`[Discord Webhook] Precheck skipped "${trigger.name}" (exit ${check.exitCode}): ${check.reason}`)
       recordSkippedRun(`discord:${trigger.name}`, trigger.projectPath, check.reason)
+      // The bot opened this thread for this message; a skipped run leaves it empty, and nothing in it
+      // is for Chip. A thread it reused (a replay) holds an earlier report and stays as it is.
+      const token = trigger.discordBotToken || process.env.DISCORD_BOT_TOKEN
+      if (token && threadId && threadCreated === true && !followUp && !isInbox && trigger.thread && trigger.webhookId) await archiveThread(token, threadId)
       return Response.json({ trigger: trigger.name, status: 'skipped', reason: check.reason })
     }
   }
