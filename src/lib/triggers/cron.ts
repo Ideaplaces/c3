@@ -76,3 +76,27 @@ export function previousOccurrence(expression: string, now: Date): Date | null {
   }
   return null
 }
+
+/**
+ * The triggers due on this tick, judged against one clock reading for the whole
+ * list and never twice in the same minute. The scheduler fires them one after
+ * the other and each firing waits on its precheck, so a clock read per trigger
+ * let the minute run out before the last ones were judged: on 30 October 2026
+ * at 0:00 Eastern the every-5, every-10 and every-15-minute prechecks took the
+ * whole minute and `machine-health` (every 30 minutes, last in the file) was read
+ * at 0:01 and never fired.
+ */
+export function dueAt<T extends { name: string; schedule: string }>(
+  triggers: T[],
+  now: Date,
+  lastFired: Map<string, number>,
+): T[] {
+  const minute = Math.floor(now.getTime() / MINUTE) * MINUTE
+  return triggers.filter(t => {
+    if (!cronMatches(t.schedule, now)) return false
+    const last = lastFired.get(t.name)
+    if (last !== undefined && last >= minute) return false
+    lastFired.set(t.name, minute)
+    return true
+  })
+}

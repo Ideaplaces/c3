@@ -2,6 +2,7 @@ import { ensureToolPath } from './src/lib/env-path.js'
 ensureToolPath()
 import fs from 'fs'
 import path from 'path'
+import { dueAt } from './src/lib/triggers/cron.js'
 
 // Load .env.local
 try {
@@ -65,52 +66,7 @@ function loadTriggers(): TriggersConfig {
 const CCC_URL = process.env.CCC_URL || 'http://localhost:8347'
 const CCC_WEBHOOK_SECRET = process.env.CCC_WEBHOOK_SECRET || ''
 
-// Minimal cron parser: supports standard 5-field cron expressions
-// Fields: minute hour day-of-month month day-of-week
-function parseCronField(field: string, min: number, max: number): number[] {
-  const values: number[] = []
-
-  for (const part of field.split(',')) {
-    if (part === '*') {
-      for (let i = min; i <= max; i++) values.push(i)
-    } else if (part.includes('/')) {
-      const [range, stepStr] = part.split('/')
-      const step = parseInt(stepStr, 10)
-      const start = range === '*' ? min : parseInt(range, 10)
-      for (let i = start; i <= max; i += step) values.push(i)
-    } else if (part.includes('-')) {
-      const [startStr, endStr] = part.split('-')
-      const start = parseInt(startStr, 10)
-      const end = parseInt(endStr, 10)
-      for (let i = start; i <= end; i++) values.push(i)
-    } else {
-      values.push(parseInt(part, 10))
-    }
-  }
-
-  return values
-}
-
-function cronMatches(expression: string, date: Date): boolean {
-  const parts = expression.trim().split(/\s+/)
-  if (parts.length !== 5) return false
-
-  const [minField, hourField, domField, monthField, dowField] = parts
-  const minute = date.getMinutes()
-  const hour = date.getHours()
-  const dom = date.getDate()
-  const month = date.getMonth() + 1 // JS months are 0-based
-  const dow = date.getDay() // 0 = Sunday
-
-  return (
-    parseCronField(minField, 0, 59).includes(minute) &&
-    parseCronField(hourField, 0, 23).includes(hour) &&
-    parseCronField(domField, 1, 31).includes(dom) &&
-    parseCronField(monthField, 1, 12).includes(month) &&
-    parseCronField(dowField, 0, 6).includes(dow)
-  )
-}
-
+// The schedule as a person reads it, for the startup log (the matcher itself is src/lib/triggers/cron.ts).
 function humanReadableCron(expression: string): string {
   const parts = expression.trim().split(/\s+/)
   if (parts.length !== 5) return expression
@@ -133,29 +89,10 @@ function humanReadableCron(expression: string): string {
   return expression
 }
 
-// Track last fire time per trigger to prevent double-fires
+// Last minute fired per trigger, so the two ticks of a minute fire it once.
 const lastFireTime = new Map<string, number>()
 
-async function checkAndFire(trigger: CronTrigger) {
-  const now = new Date()
-  const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`
-
-  if (!cronMatches(trigger.schedule, now)) {
-    // Log once per minute to avoid spam (only log at second < 30 for the first check of each 30s cycle)
-    if (now.getSeconds() < 30) {
-      console.log(`[Cron Scheduler] No match for "${trigger.name}" (${trigger.schedule}) at ${timeStr}`)
-    }
-    return
-  }
-
-  // Prevent double-fire within the same minute
-  const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
-  const lastFire = lastFireTime.get(trigger.name)
-  const currentMinuteMs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes()).getTime()
-  if (lastFire && lastFire >= currentMinuteMs) return
-
-  lastFireTime.set(trigger.name, currentMinuteMs)
-
+async function fire(trigger: CronTrigger, now: Date) {
   console.log(`[Cron Scheduler] Firing trigger "${trigger.name}" (schedule: ${trigger.schedule})`)
 
   try {
@@ -202,14 +139,17 @@ async function main() {
     // Reload config each cycle (hot-reload like other pollers)
     const freshTriggers = loadTriggers()
     const activeTriggers = Object.values(freshTriggers.cron || {}).filter(t => t.enabled !== false)
+    // One clock reading for the whole list: every trigger is judged on the same
+    // minute, however long the earlier firings take (see dueAt).
     const now = new Date()
-    console.log(`[Cron Scheduler] Checking ${activeTriggers.length} triggers at ${now.toISOString()} (${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')})`)
+    const due = dueAt(activeTriggers, now, lastFireTime)
+    console.log(`[Cron Scheduler] Checking ${activeTriggers.length} triggers at ${now.toISOString()} (${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}): ${due.length ? due.map(t => t.name).join(', ') : 'none due'}`)
 
-    for (const trigger of activeTriggers) {
+    for (const trigger of due) {
       try {
-        await checkAndFire(trigger)
+        await fire(trigger, now)
       } catch (err) {
-        console.error(`[Cron Scheduler] Error checking "${trigger.name}":`, err)
+        console.error(`[Cron Scheduler] Error firing "${trigger.name}":`, err)
       }
     }
   }
