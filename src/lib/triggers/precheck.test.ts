@@ -13,6 +13,15 @@ describe('runPrecheck protocol', () => {
     expect(r).toEqual({ proceed: false, exitCode: PRECHECK_NOTHING_TO_DO, reason: 'nothing new' })
   })
 
+  it('a silent exit 3 is still a quiet skip, not a line that reads as a failure', async () => {
+    const r = await runPrecheck('exit 3', '/tmp')
+    expect(r).toEqual({
+      proceed: false,
+      exitCode: PRECHECK_NOTHING_TO_DO,
+      reason: 'the gate printed no reason',
+    })
+  })
+
   it('a crashing gate starts the session and says so', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const r = await runPrecheck('echo "FileNotFoundError: gcloud" >&2; exit 1', '/tmp')

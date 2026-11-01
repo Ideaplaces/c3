@@ -13,6 +13,14 @@ export interface PrecheckResult {
 
 const PRECHECK_TIMEOUT_MS = parseInt(process.env.C3_PRECHECK_TIMEOUT_MS || '120000', 10)
 
+/**
+ * The reason for an exit 3 that printed nothing. Node's own "Command failed: ..."
+ * must not stand in for it: for a precheck this is the healthy skip, and the log
+ * shipper reads "failed" in a line as a production error (faro-experience,
+ * 2026-11-01). Worded to stay true for a postcheck, where exit 3 is a failure.
+ */
+const SILENT_EXIT_REASON = 'the gate printed no reason'
+
 /** The one exit code that means "checked, and there is nothing to do". */
 export const PRECHECK_NOTHING_TO_DO = 3
 
@@ -70,7 +78,7 @@ export function runPrecheck(
         if (!err) return resolve({ proceed: true, exitCode: 0, reason })
         const code = typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : -1
         if (code === PRECHECK_NOTHING_TO_DO) {
-          return resolve({ proceed: false, exitCode: code, reason: reason || err.message })
+          return resolve({ proceed: false, exitCode: code, reason: reason || SILENT_EXIT_REASON })
         }
         // `killed` is set only when we sent the signal, which for execFile is
         // the timeout and nothing else. A gate killed from outside reports the
