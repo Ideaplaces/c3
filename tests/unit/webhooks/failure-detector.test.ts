@@ -41,6 +41,10 @@ describe('detectSessionFailure', () => {
     expect(result.reason).toContain('stalled')
   })
 
+  it('flags a shell wait the watchdog cut short', () => {
+    expect(detectSessionFailure([], 'shell-wait-expired')).toEqual({ failed: true, reason: 'Session shell-wait-expired' })
+  })
+
   it('flags max-duration-exceeded sessions', () => {
     const result = detectSessionFailure([], 'max-duration-exceeded')
     expect(result.failed).toBe(true)

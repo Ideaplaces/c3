@@ -10,6 +10,7 @@ import { basename } from 'path'
 import { DEFAULT_MODEL } from '@/lib/models'
 import { recordSessionEndedWithoutResult, recordSessionUsage, startUsageTracking, trackAssistantUsage } from '@/lib/usage'
 import { agentEnv } from '@/lib/sdk/agent-env'
+import { isWaitingOnTask, nextOpenTasks, type OpenTasks } from '@/lib/sdk/open-tasks'
 
 interface ActiveSession {
   id: string
@@ -44,6 +45,9 @@ const STALL_CHECK_INTERVAL_MS = 60_000
 // The JSONL is our independent source of truth. Recover by force-emitting
 // session_ended as 'completed' so listeners pick up the agent's final output.
 const JSONL_IDLE_RECOVERY_MS = parseInt(process.env.C3_JSONL_IDLE_RECOVERY_MS || '90000', 10)
+// How long a session with only a background shell open may stay silent. Anything
+// else open (a sub-agent) holds it to the duration cap.
+const SHELL_WAIT_MS = parseInt(process.env.C3_SHELL_WAIT_MS || '900000', 10)
 // Hard cap: no session can run longer than this. Ultimate safety net.
 const MAX_SESSION_DURATION_MS = parseInt(process.env.C3_MAX_SESSION_DURATION_MS || '1800000', 10)
 
@@ -66,8 +70,8 @@ export class SessionManager extends EventEmitter {
    * 2026-09-14 two sessions drove the same TourCockpit catch-up loop into the
    * same checkout and the same watermarks at once, and the only reason nothing
    * was lost is that someone noticed. The cron webhook asks this before it
-   * runs a precheck or starts anything; a stalled session (no events for the
-   * stall window) counts as gone, because it is about to be ended anyway.
+   * runs a precheck or starts anything; a session the watchdog has marked as
+   * stalled counts as gone, because it is about to be ended anyway.
    */
   runningSessionWithLabel(label: string): string | null {
     for (const [sid, active] of this.activeSessions) {
@@ -75,7 +79,9 @@ export class SessionManager extends EventEmitter {
     }
     return null
   }
-  private stalledSessions = new Set<string>()
+  private stalledSessions = new Map<string, string>()
+  private openTasks = new Map<string, OpenTasks>()
+  private reportedQueries = new WeakSet<Query>()
   private watchdogInterval: NodeJS.Timeout
 
   constructor() {
@@ -97,7 +103,7 @@ export class SessionManager extends EventEmitter {
       const sessionAgeMs = now - sessionStart
 
       // Independent disk-based signal: has the SDK stopped writing the session
-      // file? If yes, the agent is done regardless of what the iterator is doing.
+      // file? If yes, the agent is done or waiting on an open task, checked below.
       //
       // This counts subagent transcripts too. A session that delegates with the
       // Task tool writes nothing to its own JSONL while the subagent runs, so
@@ -118,7 +124,14 @@ export class SessionManager extends EventEmitter {
 
       if (!isClassicStall && !isHungIterator && !isOverMaxDuration) continue
 
-      const reason = isHungIterator
+      const openTasks = this.openTasks.get(sid) ?? new Map<string, string>()
+      const openTaskCount = openTasks.size
+      if (!isOverMaxDuration && isWaitingOnTask(openTasks, eventAgeMs, SHELL_WAIT_MS)) continue
+
+      // A wait cut short is a failure to report, never a clean recovery.
+      const reason = openTaskCount > 0
+        ? (isOverMaxDuration ? 'max-duration-exceeded' : 'shell-wait-expired')
+        : isHungIterator
         ? 'hung-iterator-recovered'
         : isOverMaxDuration
           ? 'max-duration-exceeded'
@@ -128,9 +141,10 @@ export class SessionManager extends EventEmitter {
         `[SessionManager] Session ${sid} self-healing (${reason}): ` +
           `eventAge=${Math.round(eventAgeMs / 1000)}s, ` +
           `jsonlIdle=${jsonlIdleMs !== null ? Math.round(jsonlIdleMs / 1000) + 's' : 'n/a'}, ` +
-          `sessionAge=${Math.round(sessionAgeMs / 1000)}s`,
+          `sessionAge=${Math.round(sessionAgeMs / 1000)}s, ` +
+          `openTasks=${openTaskCount}`,
       )
-      this.stalledSessions.add(sid)
+      this.stalledSessions.set(sid, reason)
       // A run ended here never sends a result, so it would leave no ledger
       // line: the 30-minute run of 2026-09-23 posted, opened its pull request
       // and vanished from the rollup. Write what was counted so far.
@@ -154,9 +168,8 @@ export class SessionManager extends EventEmitter {
           console.warn(
             `[SessionManager] Session ${sid} did not exit after abort. Force-emitting session_ended (${reason}).`,
           )
-          this.activeSessions.delete(sid)
-          this.lastEventTime.delete(sid)
-          this.sessionStartTime.delete(sid)
+          this.reportedQueries.add(active.query)
+          this.cleanupSessionState(sid)
           const isRecovery = reason === 'hung-iterator-recovered'
           updateSession(sid, {
             status: isRecovery ? 'completed' : 'error',
@@ -175,6 +188,7 @@ export class SessionManager extends EventEmitter {
     this.lastEventTime.delete(sessionId)
     this.sessionStartTime.delete(sessionId)
     this.stalledSessions.delete(sessionId)
+    this.openTasks.delete(sessionId)
   }
 
   async startSession(params: StartSessionParams): Promise<string> {
@@ -346,6 +360,7 @@ export class SessionManager extends EventEmitter {
   stopSession(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
     if (active) {
+      this.reportedQueries.add(active.query)
       active.query.close()
       this.cleanupSessionState(sessionId)
       updateSession(sessionId, { status: 'idle' })
@@ -400,6 +415,7 @@ export class SessionManager extends EventEmitter {
     try {
       for await (const message of q) {
         this.lastEventTime.set(sessionId, Date.now())
+        this.openTasks.set(sessionId, nextOpenTasks(this.openTasks.get(sessionId) ?? new Map(), message))
         // Buffer the event in memory for late subscribers
         const event = { sessionId, message }
         const buffer = this.eventBuffers.get(sessionId)
@@ -423,23 +439,31 @@ export class SessionManager extends EventEmitter {
       }
       this.emit('session_ended', sessionId, 'completed')
     } catch (error) {
-      const wasStalled = this.stalledSessions.has(sessionId)
+      // The force-emit or a stop already reported this iterator. Writing again
+      // would flip its row and could delete a newer run on the same id.
+      if (this.reportedQueries.has(q)) {
+        console.warn(`[SessionManager] Late iterator error ignored for ${sessionId}:`, error)
+        return
+      }
+      const stallReason = this.stalledSessions.get(sessionId)
+      const wasStalled = stallReason !== undefined
+      const stallLabel = stallReason === 'max-duration-exceeded' || stallReason === 'shell-wait-expired' ? stallReason : 'stalled'
       const active = this.activeSessions.get(sessionId)
       const startedAt = this.sessionStartTime.get(sessionId)
       this.cleanupSessionState(sessionId)
       // A generator that threw sent no result either; the self-heal path may
       // already have written the line, in which case this is a no-op.
-      void recordSessionEndedWithoutResult(sessionId, wasStalled ? 'stalled' : 'error', {
+      void recordSessionEndedWithoutResult(sessionId, wasStalled ? stallLabel : 'error', {
         label: active?.label ?? 'unlabelled',
         projectPath: active?.projectPath ?? '',
         model: active?.model ?? '',
         durationMs: startedAt ? Date.now() - startedAt : 0,
       })
       const errorMessage = wasStalled
-        ? 'stalled: SDK generator aborted after no events within timeout'
+        ? `${stallLabel}: SDK generator aborted after no events within timeout`
         : error instanceof Error ? error.message : 'Unknown error'
       updateSession(sessionId, { status: 'error', errorMessage })
-      this.emit('session_ended', sessionId, wasStalled ? 'stalled' : errorMessage)
+      this.emit('session_ended', sessionId, wasStalled ? stallLabel : errorMessage)
     }
   }
 

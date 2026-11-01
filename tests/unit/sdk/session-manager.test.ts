@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Mock fs for session store
 const mockFs: Record<string, string> = {}
@@ -30,6 +30,7 @@ vi.mock('@/lib/claude-sessions/scanner', () => ({
   findSession: vi.fn(() => undefined),
   getSessionJSONLPath: vi.fn(() => null),
   entryToSessionMeta: vi.fn(),
+  getSessionLastActivityMs: vi.fn(() => null),
 }))
 
 vi.mock('@/lib/claude-sessions/reader', () => ({
@@ -298,6 +299,139 @@ describe('SessionManager', () => {
 
     it('does nothing for non-existent session', () => {
       manager.stopSession('nonexistent')
+    })
+  })
+
+  describe('watchdog: a silent session with a task open is waiting, not hung', () => {
+    const HUNG_AFTER_MS = 121_000
+    const sid = 'ccc-uuid-1234'
+
+    async function silentAfter(messages: { type: string; [key: string]: unknown }[], maxDurationMs?: number) {
+      const stream = (async function* () {
+        for (const m of messages) yield { session_id: sid, ...m }
+        await new Promise(() => {}) // the iterator stays open and says nothing
+      })()
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      vi.mocked(query).mockReturnValueOnce(Object.assign(stream, { streamInput: vi.fn() }) as never)
+      await manager.startSession({ projectPath: '/p', prompt: 'x', permissionMode: 'default', ...(maxDurationMs ? { maxDurationMs } : {}) })
+      await vi.advanceTimersByTimeAsync(0)
+      const aborted = (manager as unknown as { activeSessions: Map<string, { abortController: AbortController }> })
+        .activeSessions.get(sid)!.abortController.signal
+      return aborted
+    }
+
+    beforeEach(async () => {
+      vi.useFakeTimers()
+      manager = new SessionManager()
+      const scanner = await import('@/lib/claude-sessions/scanner')
+      vi.mocked(scanner.getSessionLastActivityMs).mockImplementation(() => Date.now() - HUNG_AFTER_MS)
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('ends a silent session with nothing open', async () => {
+      const signal = await silentAfter([{ type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0 }])
+      await vi.advanceTimersByTimeAsync(HUNG_AFTER_MS + 60_000)
+      expect(signal.aborted).toBe(true)
+    })
+
+    it('keeps a silent session whose sub-agent is still running, past the ten minute stall', async () => {
+      const signal = await silentAfter([{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_agent' }])
+      await vi.advanceTimersByTimeAsync(20 * 60_000)
+      expect(signal.aborted).toBe(false)
+    })
+
+    it('ends it once the task reports back and the session goes quiet', async () => {
+      const signal = await silentAfter([
+        { type: 'system', subtype: 'task_started', task_id: 't1' },
+        { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed' },
+      ])
+      await vi.advanceTimersByTimeAsync(HUNG_AFTER_MS + 60_000)
+      expect(signal.aborted).toBe(true)
+    })
+
+    it('still ends a task that never reports at the duration cap, and reports it as the cap', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const signal = await silentAfter([{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_agent' }], 5 * 60_000)
+      await vi.advanceTimersByTimeAsync(4 * 60_000)
+      expect(signal.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(signal.aborted).toBe(true)
+      expect(warn.mock.calls.flat().join(' ')).toContain('self-healing (max-duration-exceeded)')
+      warn.mockRestore()
+    })
+
+    it('gives a shell left running fifteen minutes of silence, then ends the session', async () => {
+      const signal = await silentAfter([{ type: 'system', subtype: 'task_started', task_id: 's1', task_type: 'local_bash' }])
+      await vi.advanceTimersByTimeAsync(14 * 60_000)
+      expect(signal.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(signal.aborted).toBe(true)
+    })
+
+    it('reports the cut wait to listeners when the abort reaches the iterator', async () => {
+      const ended: string[] = []
+      manager.on('session_ended', (_sid: string, reason: string) => ended.push(reason))
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      let signal: AbortSignal | undefined
+      const stream = (async function* () {
+        yield { session_id: sid, type: 'system', subtype: 'task_started', task_id: 's1', task_type: 'local_bash' }
+        await new Promise((_, reject) => signal!.addEventListener('abort', () => reject(new Error('aborted'))))
+      })()
+      vi.mocked(query).mockReturnValueOnce(Object.assign(stream, { streamInput: vi.fn() }) as never)
+      await manager.startSession({ projectPath: '/p', prompt: 'x', permissionMode: 'default' })
+      signal = (manager as unknown as { activeSessions: Map<string, { abortController: AbortController }> }).activeSessions.get(sid)!.abortController.signal
+      await vi.advanceTimersByTimeAsync(17 * 60_000)
+      expect(ended).toEqual(['shell-wait-expired'])
+      expect(getSession(sid)!.errorMessage).toContain('shell-wait-expired')
+    })
+
+    it('ignores an error from an iterator already reported, and leaves a newer run alone', async () => {
+      const ended: string[] = []
+      manager.on('session_ended', (_sid: string, reason: string) => ended.push(reason))
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      let lateError: (e: Error) => void = () => {}
+      const old = (async function* () {
+        yield { session_id: sid, type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0 }
+        await new Promise((_, reject) => { lateError = reject })
+      })()
+      vi.mocked(query).mockReturnValueOnce(Object.assign(old, { streamInput: vi.fn() }) as never)
+      await manager.startSession({ projectPath: '/p', prompt: 'x', permissionMode: 'default' })
+      await vi.advanceTimersByTimeAsync(HUNG_AFTER_MS + 60_000 + 31_000) // abort ignored, force-emitted
+      expect(ended).toEqual(['hung-iterator-recovered'])
+
+      await silentAfter([{ type: 'system', subtype: 'init' }])
+      lateError(new Error('late'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(ended).toEqual(['hung-iterator-recovered'])
+      expect(manager.isSessionActive(sid)).toBe(true)
+    })
+
+    it('still reports an error thrown by the normal end path', async () => {
+      const ended: string[] = []
+      manager.on('session_ended', (_sid: string, reason: string) => {
+        ended.push(reason)
+        if (reason === 'completed') throw new Error('a listener broke')
+      })
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const done = (async function* () {
+        yield { session_id: sid, type: 'system', subtype: 'init' }
+      })()
+      vi.mocked(query).mockReturnValueOnce(Object.assign(done, { streamInput: vi.fn() }) as never)
+      await manager.startSession({ projectPath: '/p', prompt: 'x', permissionMode: 'default' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(ended).toEqual(['completed', 'a listener broke'])
+    })
+
+    it('does not carry an open task into the next run of the same session', async () => {
+      const first = await silentAfter([{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_agent' }], 60_000)
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(first.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(31_000) // the force-emit path clears the session
+      const second = await silentAfter([{ type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0 }])
+      await vi.advanceTimersByTimeAsync(HUNG_AFTER_MS + 60_000)
+      expect(second.aborted).toBe(true)
     })
   })
 

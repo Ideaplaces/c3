@@ -9,7 +9,7 @@ export interface FailureCheck {
 }
 
 const NORMAL_END_REASONS = new Set(['completed', 'hung-iterator-recovered'])
-const KNOWN_FAILURE_REASONS = new Set(['stalled', 'max-duration-exceeded', 'stopped'])
+const KNOWN_FAILURE_REASONS = new Set(['stalled', 'max-duration-exceeded', 'shell-wait-expired', 'stopped'])
 
 function extractAssistantText(message: Record<string, unknown>): string {
   const inner = message.message as Record<string, unknown> | undefined
