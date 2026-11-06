@@ -15,4 +15,6 @@ export interface SessionMeta {
   firstPrompt: string
   lastPrompt: string
   errorMessage?: string
+  /** Who started it: 'web' for the C3 page, 'cron:<name>', 'discord:<name>', 'slack:<name>', 'resume'. */
+  source?: string
 }

@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, resolve } from 'path'
 import { homedir } from 'os'
 
 export interface DiscoveredProject {
@@ -9,7 +9,16 @@ export interface DiscoveredProject {
 
 function getScanDirs(): string[] {
   const raw = process.env.CCC_PROJECT_DIRS || ''
+  // `~` is expanded and a trailing slash dropped, so a dir matches the paths sessions record
   return raw.split(',').map((d) => d.trim()).filter(Boolean)
+    .map((d) => resolve(d.replace(/^~(?=$|\/)/, homedir())))
+}
+
+/** The scan dirs themselves, the folders a new session usually starts in. */
+export function discoverWorkspaces(): DiscoveredProject[] {
+  return getScanDirs()
+    .filter((dir) => existsSync(dir))
+    .map((dir) => ({ name: basename(dir), path: dir }))
 }
 
 export function discoverProjects(): DiscoveredProject[] {

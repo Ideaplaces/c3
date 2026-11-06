@@ -14,7 +14,7 @@ vi.mock('os', () => ({
   homedir: vi.fn(() => '/home/testuser'),
 }))
 
-import { discoverProjects } from '@/lib/projects/discover'
+import { discoverProjects, discoverWorkspaces } from '@/lib/projects/discover'
 
 describe('discoverProjects', () => {
   beforeEach(() => {
@@ -73,5 +73,29 @@ describe('discoverProjects', () => {
     expect(projects[1].name).toBe('projects (workspace)')
     expect(projects[2].name).toBe('alpha')
     expect(projects[3].name).toBe('zebra')
+  })
+})
+
+describe('discoverWorkspaces', () => {
+  beforeEach(() => {
+    mockExists.clear()
+  })
+
+  it('lists each existing scan dir by its folder name, skipping missing ones', () => {
+    vi.stubEnv('CCC_PROJECT_DIRS', '/home/u/ideaplaces-meta/, /home/u/gone, /home/u/eli.health-meta')
+    mockExists.add('/home/u/ideaplaces-meta')
+    mockExists.add('/home/u/eli.health-meta')
+
+    expect(discoverWorkspaces()).toEqual([
+      { name: 'ideaplaces-meta', path: '/home/u/ideaplaces-meta' },
+      { name: 'eli.health-meta', path: '/home/u/eli.health-meta' },
+    ])
+  })
+
+  it('expands ~ to the home folder', () => {
+    vi.stubEnv('CCC_PROJECT_DIRS', '~/mentorly-meta')
+    mockExists.add('/home/testuser/mentorly-meta')
+
+    expect(discoverWorkspaces()).toEqual([{ name: 'mentorly-meta', path: '/home/testuser/mentorly-meta' }])
   })
 })

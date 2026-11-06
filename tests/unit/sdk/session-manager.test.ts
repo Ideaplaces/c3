@@ -13,6 +13,7 @@ vi.mock('fs', () => ({
   }),
   mkdirSync: vi.fn(),
   existsSync: vi.fn((path: string) => path in mockFs),
+  statSync: vi.fn((path: string) => ({ mtimeMs: 0, size: mockFs[path]?.length ?? 0 })),
   readdirSync: vi.fn(() => []),
 }))
 
@@ -94,6 +95,14 @@ describe('SessionManager', () => {
   })
 
   describe('startSession', () => {
+    it('records who started the session, so the page can list only its own', async () => {
+      await manager.startSession({ projectPath: '/p', prompt: 'hi', permissionMode: 'bypassPermissions', label: 'web' })
+      await manager.startSession({ projectPath: '/p', prompt: 'hi', permissionMode: 'bypassPermissions', label: 'cron:digby' })
+
+      const stored = JSON.parse(Object.values(mockFs)[0]) as { source?: string }[]
+      expect(stored.map((s) => s.source)).toEqual(['web', 'cron:digby'])
+    })
+
     it('creates a session and passes sessionId to SDK', async () => {
       mockMessages = [
         { type: 'system', subtype: 'init', session_id: 'ccc-uuid-1234', model: 'claude-sonnet-4-6', permissionMode: 'bypassPermissions', tools: [], cwd: '/test' },
@@ -251,6 +260,15 @@ describe('SessionManager', () => {
   })
 
   describe('resumeSession as a trigger (a Discord thread follow-up)', () => {
+    it('records the trigger as the source of a session it resumes without a record', async () => {
+      mockMessages = []
+      await manager.resumeSession('s', 'more', { label: 'discord:superfan-tour-calls' })
+      await manager.resumeSession('t', 'more')
+
+      const stored = JSON.parse(Object.values(mockFs)[0]) as { id: string; source?: string }[]
+      expect(stored.map((x) => [x.id, x.source])).toEqual([['s', 'discord:superfan-tour-calls'], ['t', 'resume']])
+    })
+
     const answer = (text: string) => ({ type: 'assistant', session_id: 's', message: { content: [{ type: 'text', text }] } })
 
     it('pins the model and keeps the label and duration cap of the trigger', async () => {

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { SessionMeta } from './types'
@@ -17,14 +17,21 @@ function ensureDataDir() {
  * Read CCC's own session metadata (for active/recently-started sessions).
  * This is a small overlay on top of Claude Code's native storage.
  */
+// The overlay grows to hundreds of megabytes, so it is parsed again only when the file changed.
+let cache: { mtimeMs: number; size: number; sessions: SessionMeta[] } | null = null
+
 function readCCCSessions(): SessionMeta[] {
   ensureDataDir()
   if (!existsSync(SESSIONS_FILE)) {
     return []
   }
   try {
-    const raw = readFileSync(SESSIONS_FILE, 'utf-8')
-    return JSON.parse(raw)
+    const { mtimeMs, size } = statSync(SESSIONS_FILE)
+    if (!cache || cache.mtimeMs !== mtimeMs || cache.size !== size) {
+      cache = { mtimeMs, size, sessions: JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8')) }
+    }
+    // A copy, so a caller's push or replace never reaches the cache before it is written
+    return [...cache.sessions]
   } catch {
     return []
   }
@@ -33,6 +40,7 @@ function readCCCSessions(): SessionMeta[] {
 function writeSessions(sessions: SessionMeta[]) {
   ensureDataDir()
   writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2))
+  cache = null
 }
 
 /**
@@ -52,6 +60,28 @@ export function getAllSessions(): SessionMeta[] {
   return merged.sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   )
+}
+
+const PROMPT_PREVIEW_CHARS = 200
+
+function preview(text: string): string {
+  return text && text.length > PROMPT_PREVIEW_CHARS ? text.slice(0, PROMPT_PREVIEW_CHARS) : text
+}
+
+/**
+ * The sessions list the page shows: newest first, at most `limit`, prompts cut
+ * to a preview. `web` is only what was started from the page; `all` adds every
+ * agent run and every native Claude Code session on the machine, which is tens
+ * of thousands of rows, so it is never the default.
+ */
+export function listSessions({ scope, limit }: { scope: 'web' | 'all'; limit: number }): SessionMeta[] {
+  const pool = scope === 'web'
+    ? readCCCSessions().filter((s) => s.source === 'web')
+    : getAllSessions()
+  return pool
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, limit)
+    .map((s) => ({ ...s, firstPrompt: preview(s.firstPrompt), lastPrompt: preview(s.lastPrompt) }))
 }
 
 /**

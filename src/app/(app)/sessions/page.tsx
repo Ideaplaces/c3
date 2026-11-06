@@ -1,51 +1,70 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import type { SessionMeta } from '@/lib/store/types'
 import { SessionsTable } from '@/components/SessionsTable'
-import { NewSessionDialog } from '@/components/NewSessionDialog'
+import { NewSessionForm, type NewSessionData } from '@/components/NewSessionForm'
 import { Button } from '@/components/ui/Button'
 import { Logo } from '@/components/ui/Logo'
+
+// The sessions list is opt-in: the page is for starting a session.
+const POLL_MS = 15000
+
+type Scope = 'web' | 'all'
 
 export default function SessionsPage() {
   const router = useRouter()
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [showSessions, setShowSessions] = useState(false)
+  const [scope, setScope] = useState<Scope>('web')
   const [user, setUser] = useState<{ email: string; name: string } | null>(null)
 
-  const fetchSessions = useCallback(() => {
-    fetch('/api/sessions')
-      .then((r) => r.json())
-      .then((data) => {
-        setSessions(data.sessions)
-        setLoading(false)
-      })
-      .catch((err) => {
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const res = await fetch('/api/auth/session')
+        const data = await res.json()
+        setUser(data.user)
+      } catch (err) {
         console.error(err)
-        setLoading(false)
-      })
+      }
+    }
+    loadUser()
   }, [])
 
   useEffect(() => {
-    fetchSessions()
-    const interval = setInterval(fetchSessions, 5000)
+    if (!showSessions) return
+    // An answer for a scope the page has left, or a poll overtaken by a newer one, is dropped
+    let current = true
+    const controller = new AbortController()
+    let inFlight = false
+    const load = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const res = await fetch(`/api/sessions?scope=${scope}&limit=50`, { signal: controller.signal })
+        const data = await res.json()
+        if (current) setSessions(data.sessions)
+      } catch (err) {
+        if (current) console.error(err)
+      } finally {
+        inFlight = false
+        if (current) setLoading(false)
+      }
+    }
+    setLoading(true)
+    load()
+    const interval = setInterval(load, POLL_MS)
+    return () => {
+      current = false
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [showSessions, scope])
 
-    fetch('/api/auth/session')
-      .then((r) => r.json())
-      .then((data) => setUser(data.user))
-      .catch(console.error)
-
-    return () => clearInterval(interval)
-  }, [fetchSessions])
-
-  const handleNewSession = (data: {
-    projectPath: string
-    prompt: string
-    permissionMode: string
-    model?: string
-  }) => {
+  const handleNewSession = (data: NewSessionData) => {
     const params = new URLSearchParams({
       projectPath: data.projectPath,
       prompt: data.prompt,
@@ -74,14 +93,6 @@ export default function SessionsPage() {
                 <span className="hidden sm:inline">Triggers</span>
               </Button>
             </a>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => setDialogOpen(true)}
-            >
-              <span className="sm:hidden">+ New</span>
-              <span className="hidden sm:inline">+ New Session</span>
-            </Button>
             <a
               href="/api/auth/logout"
               className="inline-flex items-center justify-center font-semibold rounded-md transition-all duration-200 bg-transparent border border-border text-foreground hover:bg-muted px-2.5 py-1 text-xs min-h-[32px]"
@@ -95,15 +106,43 @@ export default function SessionsPage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
-        <SessionsTable sessions={sessions} loading={loading} onNewSession={() => setDialogOpen(true)} />
-      </main>
+      <main className="max-w-2xl mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6">
+        <section className="border border-border rounded-lg p-4 sm:p-6">
+          <NewSessionForm onSubmit={handleNewSession} />
+        </section>
 
-      <NewSessionDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        onSubmit={handleNewSession}
-      />
+        <section>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowSessions((v) => !v)}
+            aria-expanded={showSessions}
+            className="w-full"
+          >
+            {showSessions ? 'Hide sessions' : 'Show sessions'}
+          </Button>
+          {showSessions && (
+            <div className="mt-4 space-y-3">
+              <div className="flex gap-2">
+                {([
+                  { value: 'web', label: 'Started here' },
+                  { value: 'all', label: 'Everything' },
+                ] as const).map((s) => (
+                  <Button
+                    key={s.value}
+                    variant={scope === s.value ? 'primary' : 'outline'}
+                    size="sm"
+                    onClick={() => setScope(s.value)}
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+              <SessionsTable sessions={sessions} loading={loading} />
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   )
 }

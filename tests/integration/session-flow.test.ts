@@ -12,6 +12,7 @@ vi.mock('fs', () => ({
   }),
   mkdirSync: vi.fn(),
   existsSync: vi.fn((path: string) => path in mockFs),
+  statSync: vi.fn((path: string) => ({ mtimeMs: 0, size: mockFs[path]?.length ?? 0 })),
   readdirSync: vi.fn(() => []),
 }))
 
