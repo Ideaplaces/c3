@@ -103,7 +103,7 @@ async function handleMessage(ws: WebSocket, _user: UserPayload, message: ClientM
         const sessionId = message.sessionId
         attachRelay(ws, sessionId)
 
-        await sessionManager.resumeSession(message.sessionId, message.prompt)
+        await sessionManager.resumeSession(message.sessionId, message.prompt, { label: 'web' })
         send(ws, { type: 'session_started', sessionId: message.sessionId })
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : 'Failed to send message' })

@@ -238,6 +238,7 @@ export class SessionManager extends EventEmitter {
       totalCostUsd: 0,
       firstPrompt: prompt,
       lastPrompt: prompt,
+      source: label,
     })
 
     const q = query({ prompt, options })
@@ -351,6 +352,7 @@ export class SessionManager extends EventEmitter {
         totalCostUsd: 0,
         firstPrompt: prompt,
         lastPrompt: prompt,
+        source: opts.label ?? 'resume',
       })
     }
 
