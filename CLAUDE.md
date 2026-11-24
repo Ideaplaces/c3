@@ -74,6 +74,30 @@ alert channel, where a burst is one incident. A channel where every message is
 its own case (an NPS score, a support ticket) sets `"cooldownMs": 0` on the
 trigger so nothing is dropped.
 
+### Cron reports with Slack follow-ups
+
+A report destination is a named Slack trigger with `threadsOnly: true` and a
+`reportAgents` list of cron trigger names. The Slack bot must be a member of the
+private channel with `chat:write`, `groups:history`, and `reactions:write`.
+`users:read` lets C3 display the reply author's name.
+If the workspace requires a user credential for `conversations.replies`, set
+`slackThreadReadToken` to a server-side environment reference for a channel
+member's user token with `groups:history`. Posts and reactions use the bot.
+
+The cron agent calls `POST /api/webhooks/slack-report` with `CCC_WEBHOOK_SECRET`
+as bearer auth and `{trigger, sessionId, head, body?, idempotencyKey}`. Use the
+live `C3_TRIGGER_SESSION_ID` and keep the same key for each retry of a report.
+The endpoint returns the Slack `{ts, permalink}`. C3 links the thread when
+Slack confirms the head and holds follow-ups while the body chunks post.
+An identical completed request returns the original result. An uncertain
+Slack send returns `slack_delivery_unknown`.
+
+The poller watches bot-authored parents from the last 14 days. Human replies
+resume the linked session, or start and link a session if the transcript is
+gone. A busy reply is retried on the next poll. The poller adds `eyes` after
+the webhook accepts the reply. The answer appears in the same Slack thread.
+Slack reports and answers omit C3 URLs and stay in Slack.
+
 ### Answering a Slack alert in Discord instead of Slack
 
 A Slack trigger can carry `discordChannelId`. When it does, C3 copies the alert

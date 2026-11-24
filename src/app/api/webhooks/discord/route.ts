@@ -1,23 +1,15 @@
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { runPrecheck } from '@/lib/triggers/precheck'
 import { recordSkippedRun } from '@/lib/usage'
-import { DEFAULT_MODEL } from '@/lib/models'
 import { getChannelTrigger, loadPromptTemplate } from '@/lib/triggers/config'
 import { detectSessionFailure } from '@/lib/webhooks/failure-detector'
-import { archiveThread, followUpPrompt, linkThread, sessionForThread, shouldArchiveThread } from '@/lib/webhooks/discord-threads'
-import { getSession } from '@/lib/store/sessions'
-import { getSessionJSONLPath } from '@/lib/claude-sessions/scanner'
+import { archiveThread, shouldArchiveThread } from '@/lib/webhooks/discord-threads'
+import { extractSessionSummary, resumeOrStart, withThreadLock } from '@/lib/webhooks/thread-session'
 import { postDiscordMessage } from '@/lib/webhooks/discord-mirror'
 import { getInboxConfig } from '@/lib/inbox/config'
 import { markAnswered } from '@/lib/inbox/store'
 import { mirrorPostToInbox } from '@/lib/inbox/discord'
 import { nonceFor } from '@/lib/inbox/mirror'
-
-// Threads with a request between "received" and "session linked or resumed". A
-// second message in the same thread meanwhile (a quick reply during the first
-// message's precheck, two replies at once) is told the thread is busy instead of
-// starting a second session that would overwrite the link.
-const busyThreads = new Set<string>()
 
 export async function POST(request: Request) {
   // Verify shared secret
@@ -49,12 +41,9 @@ export async function POST(request: Request) {
   console.log(`[Webhook] Trigger "${trigger.name}" fired by ${author} in channel ${channelId}`)
 
   const threadKey = trigger.thread && threadId ? threadId : null
-  if (threadKey && busyThreads.has(threadKey)) {
-    return Response.json({ trigger: trigger.name, status: 'busy' }, { status: 409 })
-  }
+  const handle = async (): Promise<Response> => {
   const inbox = getInboxConfig()
   const isInbox = inbox?.trigger === trigger.name
-  const handle = async (): Promise<Response> => {
 
   // Chip answered an item in his inbox: it stops counting as open, so the same ask is posted
   // again as a new line if an agent still needs it.
@@ -90,41 +79,13 @@ export async function POST(request: Request) {
     }
   }
 
-  // A thread is one conversation and one session: a reply resumes the session the
-  // thread's first message started. With no live link (a thread a person opened,
-  // a session that is gone) it starts a new one from the composed thread text.
   const label = `discord:${trigger.name}`
   const reply = typeof followUp === 'string' && followUp.trim() ? followUp : null
-  const linked = trigger.thread && threadId && reply ? sessionForThread(threadId) : null
-  // Gone means gone: the overlay entry outlives the SDK transcript, and resuming a
-  // session with no transcript fails every reply in the thread.
-  const resumable = linked && linked.trigger === trigger.name && getSession(linked.sessionId) && getSessionJSONLPath(linked.sessionId)
-    ? linked.sessionId
-    : null
-  if (resumable && sessionManager.isSessionActive(resumable)) {
-    return Response.json({ trigger: trigger.name, status: 'busy', sessionId: resumable }, { status: 409 })
-  }
-
-  let sessionId: string
-  if (resumable) {
-    sessionId = resumable
-    await sessionManager.resumeSession(sessionId, followUpPrompt(author || 'someone', reply!), {
-      label,
-      maxDurationMs: trigger.maxDurationMs,
-      model: trigger.model || DEFAULT_MODEL,
-    })
-    console.log(`[Webhook] Resumed session ${sessionId} for a reply in thread ${threadId} ("${trigger.name}")`)
-  } else {
-    sessionId = await sessionManager.startSession({
-      projectPath: trigger.projectPath,
-      prompt,
-      permissionMode: trigger.permissionMode || 'bypassPermissions',
-      model: trigger.model || DEFAULT_MODEL,
-      label,
-      maxDurationMs: trigger.maxDurationMs,
-    })
-    if (trigger.thread && threadId) linkThread(threadId, sessionId, trigger.name)
-    console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
+  const { sessionId, status } = await resumeOrStart({
+    key: threadKey, trigger, platform: 'Discord', author: author || 'someone', reply, prompt,
+  })
+  if (status === 'busy') {
+    return Response.json({ trigger: trigger.name, status, sessionId }, { status: 409 })
   }
 
   // Set up completion callback: post reply to Discord and/or call external URL.
@@ -143,7 +104,7 @@ export async function POST(request: Request) {
     const failure = detectSessionFailure(events, reason)
 
     // Extract summary from buffered events
-    const summary = extractSummary(events, reason)
+    const summary = extractSessionSummary(events, reason, 1500)
 
     // Reply in Discord directly
     if (discordBotToken && messageId) {
@@ -221,35 +182,8 @@ export async function POST(request: Request) {
 
   sessionManager.on('session_ended', onSessionEnded)
 
-  return Response.json({ sessionId, trigger: trigger.name, status: resumable ? 'resumed' : 'started' })
+  return Response.json({ sessionId, trigger: trigger.name, status })
   }
 
-  if (threadKey) busyThreads.add(threadKey)
-  try {
-    return await handle()
-  } finally {
-    if (threadKey) busyThreads.delete(threadKey)
-  }
-}
-
-function extractSummary(events: { message: unknown }[], reason: string): string {
-
-  for (let i = events.length - 1; i >= 0; i--) {
-    const msg = events[i].message as Record<string, unknown>
-    if (msg.type === 'assistant' && msg.message) {
-      const assistantMsg = msg.message as Record<string, unknown>
-      const content = assistantMsg.content
-      if (Array.isArray(content)) {
-        const textParts = content
-          .filter((c: Record<string, unknown>) => c.type === 'text')
-          .map((c: Record<string, unknown>) => c.text)
-          .join('\n')
-        if (textParts) return textParts.slice(0, 1500)
-      } else if (typeof content === 'string' && content) {
-        return content.slice(0, 1500)
-      }
-    }
-  }
-
-  return `Session completed (${reason})`
+  return await withThreadLock(threadKey, handle, () => Response.json({ trigger: trigger.name, status: 'busy' }, { status: 409 }))
 }

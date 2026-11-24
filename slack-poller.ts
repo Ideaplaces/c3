@@ -1,45 +1,28 @@
 import { ensureToolPath } from './src/lib/env-path.js'
-ensureToolPath()
 import fs from 'fs'
 import path from 'path'
+import type { SlackTrigger } from './src/lib/triggers/config.js'
+import { resolveSlackToken } from './src/lib/webhooks/resolve-slack-token.js'
+import { forwardToC3, getMessageAuthor, hasBeenProcessed, markAsProcessed, slackConversationPage } from './src/lib/slack-poller/client.js'
+import { pollSlackThreads } from './src/lib/slack-poller/threads.js'
+import { filterCandidates, shouldProcessMessage, extractFullText, isProcessed, markProcessed } from './src/lib/slack-poller/logic.js'
 
-// Load .env.local
-try {
-  const envPath = path.join(process.cwd(), '.env.local')
-  const envContent = fs.readFileSync(envPath, 'utf-8')
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-    const eqIdx = trimmed.indexOf('=')
-    if (eqIdx === -1) continue
-    const key = trimmed.slice(0, eqIdx)
-    const value = trimmed.slice(eqIdx + 1)
-    if (!process.env[key]) {
-      process.env[key] = value
+function loadLocalEnv() {
+  try {
+    const envPath = path.join(process.cwd(), '.env.local')
+    const envContent = fs.readFileSync(envPath, 'utf-8')
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx === -1) continue
+      const key = trimmed.slice(0, eqIdx)
+      const value = trimmed.slice(eqIdx + 1)
+      if (!process.env[key]) process.env[key] = value
     }
+  } catch {
+    // rely on environment
   }
-} catch {
-  // rely on environment
-}
-
-// Load triggers config
-interface SlackTrigger {
-  name: string
-  channelId: string
-  prompt: string
-  projectPath: string
-  permissionMode: string
-  model: string
-  slackBotToken?: string
-  pollIntervalMs?: number
-  // Minimum gap between two sessions on this channel. Defaults to COOLDOWN_MS
-  // (5 minutes). 0 for channels where every message is its own case.
-  cooldownMs?: number
-  // When true, the poller never writes to the channel: no 👀 marker on the
-  // alert. Dedup falls back to the local processed ledger in the state file.
-  // Used on channels shared with a team, where a reaction reads as "someone is
-  // handling this" when nobody is.
-  noReaction?: boolean
 }
 
 interface TriggersConfig {
@@ -94,10 +77,6 @@ function loadTriggers(): TriggersConfig {
   }
 }
 
-const CCC_URL = process.env.CCC_URL || 'http://localhost:8347'
-const CCC_WEBHOOK_SECRET = process.env.CCC_WEBHOOK_SECRET || ''
-const DEFAULT_SLACK_TOKEN = process.env.SLACK_BOT_TOKEN || ''
-
 // Track last seen message per channel
 const STATE_FILE = path.join(process.env.HOME || '/tmp', '.ccc', 'data', 'slack-poller-state.json')
 
@@ -106,12 +85,13 @@ interface PollerState {
   // Processed message timestamps per channel, for triggers running with
   // noReaction: true (no 👀 marker to read back from Slack).
   processed?: Record<string, string[]>
+  lastReplySeen?: Record<string, Record<string, string>>
 }
 
 function loadState(): PollerState {
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as PollerState
-    return { lastTs: parsed.lastTs || {}, processed: parsed.processed || {} }
+    return { lastTs: parsed.lastTs || {}, processed: parsed.processed || {}, lastReplySeen: parsed.lastReplySeen || {} }
   } catch {
     return { lastTs: {}, processed: {} }
   }
@@ -123,64 +103,20 @@ function saveState(state: PollerState) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
 }
 
-import {
-  filterCandidates,
-  shouldProcessMessage,
-  extractFullText,
-  isProcessed,
-  markProcessed,
-  PROCESSED_REACTION,
-  type SlackMessage,
-} from './src/lib/slack-poller/logic.js'
-
-interface SlackHistoryResponse {
-  ok: boolean
-  messages?: SlackMessage[]
-  error?: string
-}
-
-interface SlackUserResponse {
-  ok: boolean
-  user?: { real_name?: string; name?: string }
-}
-
-interface SlackApiResponse {
-  ok: boolean
-  error?: string
-}
-
 // Rate limiting state (in-memory, resets on restart)
 const lastSessionTime = new Map<string, number>()
 
-async function hasBeenProcessed(token: string, channelId: string, ts: string): Promise<boolean> {
-  const res = await fetch(
-    `https://slack.com/api/reactions.get?channel=${channelId}&timestamp=${ts}`,
-    { headers: { 'Authorization': `Bearer ${token}` } }
-  )
-  const data = await res.json() as { ok: boolean; message?: { reactions?: { name: string }[] } }
-  if (!data.ok || !data.message?.reactions) return false
-  return data.message.reactions.some(r => r.name === PROCESSED_REACTION)
-}
-
-async function markAsProcessed(token: string, channelId: string, ts: string): Promise<void> {
-  const res = await fetch('https://slack.com/api/reactions.add', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ channel: channelId, timestamp: ts, name: PROCESSED_REACTION }),
-  })
-  const data = await res.json() as SlackApiResponse
-  if (!data.ok && data.error !== 'already_reacted') {
-    console.error(`[Slack Poller] Failed to add reaction: ${data.error}`)
-  }
-}
-
-async function pollChannel(trigger: SlackTrigger, state: PollerState) {
-  const token = trigger.slackBotToken || DEFAULT_SLACK_TOKEN
+export async function pollChannel(trigger: SlackTrigger, state: PollerState, persist = saveState) {
+  const token = resolveSlackToken(trigger.slackBotToken)
   if (!token) {
     console.error(`[Slack Poller] No token for ${trigger.name}`)
+    return
+  }
+
+  if (trigger.threadsOnly) {
+    state.lastReplySeen ??= {}
+    const lastReplySeen = state.lastReplySeen[trigger.channelId] ??= {}
+    if (await pollSlackThreads(trigger, token, lastReplySeen)) persist(state)
     return
   }
 
@@ -188,12 +124,9 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
   const useReaction = trigger.noReaction !== true
 
   const oldest = state.lastTs[trigger.channelId] || ''
-  const url = `https://slack.com/api/conversations.history?channel=${trigger.channelId}&limit=10${oldest ? `&oldest=${oldest}` : ''}`
-
-  const res = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${token}` },
+  const data = await slackConversationPage(token, 'history', {
+    channel: trigger.channelId, limit: '10', ...(oldest ? { oldest } : {}),
   })
-  const data = await res.json() as SlackHistoryResponse
 
   if (!data.ok) {
     console.error(`[Slack Poller] Error polling ${trigger.name}: ${data.error}`)
@@ -208,7 +141,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
   for (const msg of candidates) {
     // Update last seen timestamp regardless of whether we process it
     state.lastTs[trigger.channelId] = msg.ts
-    saveState(state)
+    persist(state)
 
     // Check if already processed: the 👀 reaction via the Slack API, or the
     // local ledger for channels the poller must not write to.
@@ -234,21 +167,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
       continue
     }
 
-    // Get author name
-    let author = 'bot'
-    if (msg.user) {
-      try {
-        const userRes = await fetch(`https://slack.com/api/users.info?user=${msg.user}`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        })
-        const userData = await userRes.json() as SlackUserResponse
-        if (userData.ok && userData.user) {
-          author = userData.user.real_name || userData.user.name || msg.user
-        }
-      } catch {
-        author = msg.user
-      }
-    }
+    const author = await getMessageAuthor(token, msg.user)
 
     // Extract full message content (blocks + attachments, not just truncated text)
     const fullMessage = extractFullText(msg)
@@ -262,19 +181,8 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
     let failureReason: string | undefined
 
     try {
-      const webhookRes = await fetch(`${CCC_URL}/api/webhooks/slack`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${CCC_WEBHOOK_SECRET}`,
-        },
-        body: JSON.stringify({
-          channelId: trigger.channelId,
-          channelName: trigger.name,
-          message: fullMessage,
-          author,
-          messageTs: msg.ts,
-        }),
+      const webhookRes = await forwardToC3({
+        channelId: trigger.channelId, channelName: trigger.name, message: fullMessage, author, messageTs: msg.ts,
       })
 
       if (!webhookRes.ok) {
@@ -309,7 +217,7 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
           state.processed[trigger.channelId],
           msg.ts,
         )
-        saveState(state)
+        persist(state)
       }
     } else {
       console.error(
@@ -325,6 +233,8 @@ async function pollChannel(trigger: SlackTrigger, state: PollerState) {
 
 // Main loop
 async function main() {
+  ensureToolPath()
+  loadLocalEnv()
   const triggers = loadTriggers()
   const slackTriggers = Object.values(triggers.slack || {})
 
@@ -342,7 +252,7 @@ async function main() {
 
   // Initialize last seen timestamps to now if not set (don't process old messages)
   for (const trigger of slackTriggers) {
-    if (!state.lastTs[trigger.channelId]) {
+    if (!trigger.threadsOnly && !state.lastTs[trigger.channelId]) {
       // Set to current time so we only process NEW messages
       state.lastTs[trigger.channelId] = String(Date.now() / 1000)
       saveState(state)
@@ -375,7 +285,13 @@ async function main() {
   })
 }
 
-main().catch(err => {
-  console.error('[Slack Poller] Fatal error:', err)
-  process.exit(1)
-})
+async function run() {
+  try {
+    await main()
+  } catch (err) {
+    console.error('[Slack Poller] Fatal error:', err)
+    process.exit(1)
+  }
+}
+
+if (typeof require !== 'undefined' && require.main === module) void run()

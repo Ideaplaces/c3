@@ -9,6 +9,7 @@ export interface SlackMessage {
   bot_id?: string
   ts: string
   thread_ts?: string
+  latest_reply?: string
   subtype?: string
   reactions?: { name: string; users: string[] }[]
   blocks?: SlackBlock[]
@@ -93,6 +94,36 @@ export function extractFullText(msg: SlackMessage): string {
 
 export const PROCESSED_REACTION = 'eyes'
 export const COOLDOWN_MS = 5 * 60 * 1000
+const THREAD_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000
+
+export function oldestReportThread(now = Date.now()): number {
+  return (now - THREAD_LOOKBACK_MS) / 1000
+}
+
+export function threadsWithNewReplies(
+  parents: SlackMessage[], lastReplySeen: Record<string, string>, now = Date.now(),
+): (SlackMessage & { latest_reply: string })[] {
+  return parents.filter((parent): parent is SlackMessage & { latest_reply: string } =>
+    Number(parent.ts) >= oldestReportThread(now)
+    && (!parent.thread_ts || parent.thread_ts === parent.ts)
+    && Boolean(parent.bot_id || parent.subtype === 'bot_message')
+    && Boolean(parent.latest_reply && parent.latest_reply !== lastReplySeen[parent.ts]),
+  )
+}
+
+export function repliesToForward(replies: SlackMessage[], botUserId: string): SlackMessage[] {
+  const seen = new Set(replies.filter(hasProcessedReaction).map(reply => reply.ts))
+  return replies
+    .filter(reply => reply.thread_ts && reply.ts !== reply.thread_ts
+      && reply.user && reply.user !== botUserId && !reply.bot_id
+      && (!reply.subtype || reply.subtype === 'thread_broadcast'))
+    .filter(reply => {
+      if (seen.has(reply.ts)) return false
+      seen.add(reply.ts)
+      return true
+    })
+    .sort((a, b) => Number(a.ts) - Number(b.ts))
+}
 
 /** How many processed timestamps to retain per channel in the local ledger. */
 export const MAX_PROCESSED_HISTORY = 200

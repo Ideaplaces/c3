@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 
 /**
- * Which Claude session a Discord thread belongs to. A thread is one
+ * Which Claude session a Discord or Slack thread belongs to. A thread is one
  * conversation, so it is one session: the first message in the thread starts
  * it, every reply resumes it (Chip, 2026-10-14: "a thread is linked with a
  * Claude Code session, and everything is on top of that same session").
@@ -15,6 +15,7 @@ export interface ThreadLink {
   sessionId: string
   trigger: string
   linkedAt: string
+  slackReplies?: Record<string, { sessionId: string; status: 'started' | 'resumed' }>
 }
 
 const MAX_AGE_DAYS = 30
@@ -38,9 +39,23 @@ export function sessionForThread(threadId: string, file = threadsFile()): Thread
 }
 
 export function linkThread(threadId: string, sessionId: string, trigger: string, now = new Date(), file = threadsFile()): void {
+  saveLink(threadId, { sessionId, trigger, linkedAt: now.toISOString() }, now, file)
+}
+
+export function recordSlackThreadReply(
+  threadId: string, trigger: string, ts: string, accepted: { sessionId: string; status: 'started' | 'resumed' }, previous: ThreadLink | null,
+): void {
+  const now = new Date()
+  saveLink(threadId, {
+    sessionId: accepted.sessionId, trigger, linkedAt: now.toISOString(),
+    slackReplies: { ...(previous?.trigger === trigger ? previous.slackReplies : {}), [ts]: accepted },
+  }, now, threadsFile())
+}
+
+function saveLink(threadId: string, link: ThreadLink, now: Date, file: string): void {
   const cut = now.getTime() - MAX_AGE_DAYS * 86_400_000
   const links = Object.fromEntries(Object.entries(read(file)).filter(([, l]) => Date.parse(l.linkedAt) >= cut))
-  links[threadId] = { sessionId, trigger, linkedAt: now.toISOString() }
+  links[threadId] = link
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(links, null, 1) + '\n')
@@ -48,16 +63,18 @@ export function linkThread(threadId: string, sessionId: string, trigger: string,
 }
 
 /** The turn a resumed session receives: only the new message, since it already has the rest. */
-export function followUpPrompt(author: string, message: string): string {
+export function followUpPrompt(author: string, message: string, platform: 'Discord' | 'Slack' = 'Discord'): string {
   return [
-    `${author} replied in the Discord thread:`,
+    `${author} replied in the ${platform} thread:`,
     '',
     '<message>',
     message.trim(),
     '</message>',
     '',
     'Answer this message. Your final message is posted in the thread for them: the answer first,',
-    'short. Do not post to Discord yourself, and do not start new work they did not ask for.',
+    platform === 'Discord'
+      ? 'short. Do not post to Discord yourself, and do not start new work they did not ask for.'
+      : 'short. Let C3 deliver it. Keep session URLs out of your answer and stay within the request.',
   ].join('\n')
 }
 

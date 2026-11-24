@@ -5,6 +5,8 @@ import {
   checkCooldown,
   shouldProcessMessage,
   extractFullText,
+  repliesToForward,
+  threadsWithNewReplies,
   isProcessed,
   markProcessed,
   COOLDOWN_MS,
@@ -12,6 +14,38 @@ import {
   PROCESSED_REACTION,
   type SlackMessage,
 } from '@/lib/slack-poller/logic'
+
+describe('Slack report threads', () => {
+  it('finds only recent bot parents whose latest reply has changed', () => {
+    const now = Date.parse('2026-11-24T00:00:00Z')
+    const parent = (daysAgo: number, fields: Partial<SlackMessage> = {}): SlackMessage => ({
+      text: 'report', ts: `${now / 1000 - daysAgo * 86400}.000000`,
+      bot_id: 'B1', latest_reply: '1795470000.000001', ...fields,
+    })
+    const changed = parent(1)
+    const unchanged = parent(2)
+    expect(threadsWithNewReplies([
+      changed, unchanged, parent(3, { bot_id: undefined }),
+      parent(4, { latest_reply: undefined }), parent(15),
+      parent(5, { subtype: 'thread_broadcast', thread_ts: changed.ts }),
+    ], { [unchanged.ts]: unchanged.latest_reply! }, now)).toEqual([changed])
+  })
+
+  it('forwards human replies including broadcasts only once in timestamp order', () => {
+    const parent = { text: 'report', ts: '1.000001', bot_id: 'B1' }
+    const reply = (ts: string, fields: Partial<SlackMessage> = {}): SlackMessage => ({
+      text: 'reply', thread_ts: parent.ts, ts, user: 'U1', ...fields,
+    })
+    const first = reply('2.000001')
+    const broadcast = reply('3.000001', { subtype: 'thread_broadcast' })
+    expect(repliesToForward([
+      parent, broadcast, first, broadcast,
+      reply('4.000001', { user: 'UBOT' }), reply('5.000001', { bot_id: 'B2' }),
+      reply('6.000001', { reactions: [{ name: 'eyes', users: ['U2'] }] }),
+      reply('7.000001', { subtype: 'message_deleted' }),
+    ], 'UBOT')).toEqual([first, broadcast])
+  })
+})
 
 describe('filterCandidates', () => {
   const makeMsg = (overrides: Partial<SlackMessage> = {}): SlackMessage => ({
