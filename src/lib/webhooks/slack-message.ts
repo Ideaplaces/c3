@@ -34,7 +34,7 @@ export function formatSlackReport(markdown: string, trigger?: Pick<SlackTrigger,
     hostOf(process.env.C3_BASE_URL || ''), hostOf(process.env.CCC_URL || ''),
     hostOf(process.env.NEXT_PUBLIC_BASE_URL || ''),
   ].filter((host): host is string => Boolean(host)))
-  const ideaPlacesName = /\bideaplaces\b/i
+  const ideaPlacesName = /ideaplaces/i
   const hosts = [...c3Hosts].map(host => host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   if (mentorly) hosts.unshift('(?:[a-z0-9-]+\\.)*ideaplaces\\.com')
   const bareHost = `(?<![\\w.-])(?:${hosts.join('|')})(?![\\w-]|\\.[\\w-])\\.?(?::\\d+)?(?:[/?#][^\\s<>|\\x60*)\\]]*)?`
@@ -51,14 +51,14 @@ export function formatSlackReport(markdown: string, trigger?: Pick<SlackTrigger,
   const bareHostPattern = new RegExp(bareHost, 'gi')
   const stripBare = (value: string) => {
     const stripped = value.replace(bareHostPattern, '')
-    return mentorly ? stripped.replace(/\bideaplaces\b/gi, '') : stripped
+    return mentorly ? stripped.replace(/ideaplaces/gi, '') : stripped
   }
   const prefix = String.raw`(?:[a-z][a-z\d+.-]*:)?//`
   const slackLink = String.raw`<(${prefix}[^<>\s|]+)(?:\|([^<>]*))?>`
   const rawMarkdownLink = String.raw`!?\[([^\]\n]*)\]\(<?(${prefix}(?:[^\s<>()]|\([^\s<>()]*\))+)>?(?:\s+["'][^\n]*?["'])?\)`
   const linkOrBare = new RegExp([
     rawMarkdownLink, slackLink, String.raw`(${prefix}[^\s<>\x60*)\]]+)`,
-    bareHost, ...(mentorly ? [String.raw`\bideaplaces\b`] : []),
+    bareHost, ...(mentorly ? [String.raw`ideaplaces`] : []),
   ].join('|'), 'gi')
   const scrub = (text: string) => text.replace(linkOrBare,
     (match, rawLabel?: string, rawUrl?: string, url?: string, label?: string, bareUrl?: string) => {

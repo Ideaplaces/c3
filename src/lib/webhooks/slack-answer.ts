@@ -137,7 +137,8 @@ async function attemptDelivery(
     }
 
     if (!answer.chunks) {
-      const run = live
+      // A hung iterator stopped streaming before the final message; the transcript holds it.
+      const run = live && live.reason !== 'hung-iterator-recovered'
         ? { events: sessionManager.getRunEvents(answer.sessionId), reason: live.reason }
         : recoverTurn(answer)
       const meta = live && getSession(answer.sessionId)

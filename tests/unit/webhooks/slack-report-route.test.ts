@@ -16,6 +16,14 @@ it('retains the original formatting behavior when no destination is supplied', (
   expect(formatSlackReport('See [the session](https://c3.ideaplaces.com/sessions/abc)')).toBe('See the session')
 })
 
+test('the IdeaPlaces name never reaches the Mentorly workspace, joined to other words included', () => {
+  const mentorly = { projectPath: '~/mentorly-meta' }
+  for (const text of ['Fixed in ideaplaces_meta and C3_IDEAPLACES_TOKEN', 'IdeaPlacesMeta repo', 'see IdeaPlaces']) {
+    expect(formatSlackReport(text, mentorly)).not.toMatch(/ideaplaces/i)
+  }
+})
+
+
 const report = {
   trigger: 'reports', sessionId: 'cron-session', head: '**Daily report**',
   idempotencyKey: 'cron-session:daily-report',

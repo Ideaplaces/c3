@@ -218,6 +218,23 @@ describe('Slack thread reply webhook and answer delivery', () => {
     ])
   })
 
+  it('posts the transcript answer, not the last streamed text, when the run ends as hung-iterator-recovered', async () => {
+    const transcript = join(dir, 'hung.jsonl')
+    transcriptPath.mockReturnValue(transcript)
+    const { sessionId } = await (await post()).json()
+    const prompt = manager.startSession.mock.calls[0][0].prompt
+    writeFileSync(transcript, [
+      { type: 'user', message: { content: prompt }, timestamp: new Date().toISOString() },
+      assistant('Working on it', 'tool_use'),
+      assistant('Final answer from the transcript'),
+    ].map(value => JSON.stringify(value)).join('\n'))
+    getSession.mockReturnValue({ status: 'completed', lastPrompt: prompt })
+    manager.getRunEvents.mockReturnValue([{ sessionId, message: assistant('Working on it', 'tool_use') }])
+    events.emit('session_ended', sessionId, 'hung-iterator-recovered')
+    await restartAndDrain()
+    expect(postedText()).toEqual(['Final answer from the transcript'])
+  })
+
   it('skips live sessions and expires pending and delivered answers after 30 days', async () => {
     let now = Date.now()
     vi.spyOn(Date, 'now').mockImplementation(() => now)
