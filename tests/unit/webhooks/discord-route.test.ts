@@ -37,6 +37,7 @@ vi.mock('@/lib/inbox/discord', () => ({ mirrorPostToInbox }))
 
 import { POST } from '@/app/api/webhooks/discord/route'
 import { sessionForThread, followUpPrompt, linkThread } from '@/lib/webhooks/discord-threads'
+import { resolveResumable } from '@/lib/webhooks/thread-session'
 import { getItem, saveItem } from '@/lib/inbox/store'
 
 const fan = { name: 'superfan-tour-calls', channelId: 'C1', prompt: 'superfan-chat.md', projectPath: '/p', permissionMode: 'bypassPermissions', model: 'm', thread: true, maxDurationMs: 1000 }
@@ -186,6 +187,7 @@ describe('discord webhook: a thread is one session', () => {
 
   it('does not resume another trigger’s session from a shared thread id', async () => {
     await post({ message: 'q', threadId: 'T1' })
+    expect(resolveResumable('T1', 'superfan-scout')).toBeNull()
     getChannelTrigger.mockReturnValue({ ...fan, name: 'superfan-scout' })
     await post({ message: 'q', threadId: 'T1', followUp: 'more' })
     expect(resumeSession).not.toHaveBeenCalled()

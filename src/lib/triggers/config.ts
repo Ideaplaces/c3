@@ -68,6 +68,15 @@ export interface ChannelTrigger {
 
 export interface SlackTrigger extends ChannelTrigger {
   slackBotToken?: string
+  /** Slack workspace name. Mentorly project paths also identify existing Mentorly triggers. */
+  workspace?: string
+  pollIntervalMs?: number
+  /** Watch only replies to bot-authored thread parents. */
+  threadsOnly?: boolean
+  /** Optional user token for workspace configurations that require it to read channel threads. */
+  slackThreadReadToken?: string
+  /** Cron trigger names allowed to publish reports to this channel. */
+  reportAgents?: string[]
   // When false, the webhook handler skips posting "session started" and
   // "investigation complete" replies in the alert channel thread. The agent
   // is then responsible for delivering the result itself (e.g. as a DM).
@@ -235,6 +244,11 @@ export function getSlackTrigger(channelId: string): SlackTrigger | null {
     }
   }
   return null
+}
+
+export function getSlackTriggerByName(name: string): SlackTrigger | null {
+  const trigger = getAllSlackTriggers().find(candidate => candidate.name === name)
+  return trigger ? { ...trigger, projectPath: resolveProjectPath(trigger.projectPath) } : null
 }
 
 export function getAllSlackTriggers(): SlackTrigger[] {

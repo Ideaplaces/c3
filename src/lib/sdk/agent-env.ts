@@ -20,6 +20,10 @@ export function agentEnv(base: Record<string, string | undefined>, sessionId: st
   delete env.ANTHROPIC_API_KEY
   delete env.SLACK_BOT_TOKEN
   delete env.DISCORD_BOT_TOKEN
+  // Trigger-specific Slack tokens can be named by any environment variable.
+  for (const [name, value] of Object.entries(env)) {
+    if (value && /^(?:xoxe\.)?xox[bp]-/.test(value)) delete env[name]
+  }
   delete env.C3_TRIGGER_SESSION_ID
   delete env.C3_TRIGGER_NAME
   if (label) env.C3_TRIGGER_NAME = label

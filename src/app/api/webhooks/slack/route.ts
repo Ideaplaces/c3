@@ -17,6 +17,8 @@ import {
   postDiscordChunked,
 } from '@/lib/webhooks/discord-mirror'
 import { mirrorPostToInbox } from '@/lib/inbox/discord'
+import { handleSlackThreadReply } from '@/lib/webhooks/slack-thread-reply'
+import { extractSessionSummary } from '@/lib/webhooks/thread-session'
 
 /** How much of the agent's report is carried into Discord, split across messages. */
 const DISCORD_REPORT_LIMIT = 6000
@@ -29,7 +31,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { channelId, channelName, message, author, messageTs } = body
+  const { channelId, channelName, message, author, messageTs, threadTs, followUp } = body
 
   if (!channelId || !message) {
     return Response.json({ error: 'Missing channelId or message' }, { status: 400 })
@@ -39,6 +41,16 @@ export async function POST(request: Request) {
   if (!trigger) {
     console.log(`[Slack Webhook] No trigger configured for channel ${channelId} (${channelName})`)
     return Response.json({ error: 'Channel not configured' }, { status: 404 })
+  }
+
+  if (typeof threadTs === 'string' && threadTs && typeof followUp === 'string' && followUp.trim()) {
+    if (typeof messageTs !== 'string' || !/^\d+(?:\.\d+)?$/.test(messageTs)) {
+      return Response.json({ error: 'Invalid messageTs' }, { status: 400 })
+    }
+    return await handleSlackThreadReply(trigger, { threadTs, messageTs, message, author, followUp })
+  }
+  if (trigger.threadsOnly) {
+    return Response.json({ error: 'Missing threadTs or followUp' }, { status: 400 })
   }
 
   console.log(`[Slack Webhook] Trigger "${trigger.name}" fired in #${channelName}`)
@@ -420,25 +432,6 @@ async function getSlackPermalink(
 }
 
 function extractSummary(sessionId: string, reason: string, maxChars = 3000): string {
-  const events = sessionManager.getBufferedEvents(sessionId)
-
-  for (let i = events.length - 1; i >= 0; i--) {
-    const msg = events[i].message as Record<string, unknown>
-    if (msg.type === 'assistant' && msg.message) {
-      const assistantMsg = msg.message as Record<string, unknown>
-      const content = assistantMsg.content
-      if (Array.isArray(content)) {
-        const textParts = content
-          .filter((c: Record<string, unknown>) => c.type === 'text')
-          .map((c: Record<string, unknown>) => c.text)
-          .join('\n')
-        if (textParts) return textParts.slice(0, maxChars)
-      } else if (typeof content === 'string' && content) {
-        return content.slice(0, maxChars)
-      }
-    }
-  }
-
-  return `Session completed (${reason})`
+  return extractSessionSummary(sessionManager.getBufferedEvents(sessionId), reason, maxChars)
 }
 

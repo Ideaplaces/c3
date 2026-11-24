@@ -405,14 +405,16 @@ describe('SessionManager', () => {
       expect(getSession(sid)!.errorMessage).toContain('shell-wait-expired')
     })
 
-    it('ignores an error from an iterator already reported, and leaves a newer run alone', async () => {
+    it.each(['error', 'completion'])('ignores a late %s from an iterator already reported', async outcome => {
       const ended: string[] = []
       manager.on('session_ended', (_sid: string, reason: string) => ended.push(reason))
       const { query } = await import('@anthropic-ai/claude-agent-sdk')
-      let lateError: (e: Error) => void = () => {}
+      let finishOldRun: () => void = () => {}
       const old = (async function* () {
         yield { session_id: sid, type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0 }
-        await new Promise((_, reject) => { lateError = reject })
+        await new Promise<void>((resolve, reject) => {
+          finishOldRun = outcome === 'error' ? () => reject(new Error('late')) : resolve
+        })
       })()
       vi.mocked(query).mockReturnValueOnce(Object.assign(old, { streamInput: vi.fn() }) as never)
       await manager.startSession({ projectPath: '/p', prompt: 'x', permissionMode: 'default' })
@@ -420,10 +422,37 @@ describe('SessionManager', () => {
       expect(ended).toEqual(['hung-iterator-recovered'])
 
       await silentAfter([{ type: 'system', subtype: 'init' }])
-      lateError(new Error('late'))
+      finishOldRun()
       await vi.advanceTimersByTimeAsync(0)
       expect(ended).toEqual(['hung-iterator-recovered'])
       expect(manager.isSessionActive(sid)).toBe(true)
+    })
+
+    it('does not force-end a resumed session with the earlier run watchdog', async () => {
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const ended: string[] = []
+      manager.on('session_ended', (_sid: string, reason: string) => ended.push(reason))
+      let signal: AbortSignal
+      const old = (async function* () {
+        yield { session_id: sid, type: 'system', subtype: 'init' }
+        await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))))
+      })()
+      vi.mocked(query).mockReturnValueOnce(Object.assign(old, { streamInput: vi.fn() }) as never)
+      await manager.startSession({ projectPath: '/p', prompt: 'first', permissionMode: 'default' })
+      signal = manager.getActiveSession(sid)!.abortController.signal
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(signal.aborted).toBe(true)
+      expect(ended).toHaveLength(1)
+
+      const resumed = (async function* () {
+        yield { session_id: sid, type: 'system', subtype: 'init' }
+        await new Promise(() => {})
+      })()
+      vi.mocked(query).mockReturnValueOnce(Object.assign(resumed, { streamInput: vi.fn() }) as never)
+      await manager.resumeSession(sid, 'next Slack reply')
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(manager.getActiveSession(sid)?.query).toBe(resumed)
+      expect(ended).toHaveLength(1)
     })
 
     it('still reports an error thrown by the normal end path', async () => {

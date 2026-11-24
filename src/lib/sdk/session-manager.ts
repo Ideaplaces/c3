@@ -164,7 +164,7 @@ export class SessionManager extends EventEmitter {
       // For the hung-iterator case, the JSONL on disk already contains the full
       // agent output, so listeners extracting a summary still get it.
       setTimeout(() => {
-        if (this.activeSessions.has(sid)) {
+        if (this.activeSessions.get(sid)?.query === active.query) {
           console.warn(
             `[SessionManager] Session ${sid} did not exit after abort. Force-emitting session_ended (${reason}).`,
           )
@@ -416,6 +416,7 @@ export class SessionManager extends EventEmitter {
 
     try {
       for await (const message of q) {
+        if (this.reportedQueries.has(q)) return
         this.lastEventTime.set(sessionId, Date.now())
         this.openTasks.set(sessionId, nextOpenTasks(this.openTasks.get(sessionId) ?? new Map(), message))
         // Buffer the event in memory for late subscribers
@@ -434,6 +435,7 @@ export class SessionManager extends EventEmitter {
       }
 
       // Generator completed normally
+      if (this.reportedQueries.has(q)) return
       this.cleanupSessionState(sessionId)
       const currentSession = getSession(sessionId)
       if (!currentSession || !['completed', 'error'].includes(currentSession.status)) {

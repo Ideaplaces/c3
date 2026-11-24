@@ -74,6 +74,45 @@ alert channel, where a burst is one incident. A channel where every message is
 its own case (an NPS score, a support ticket) sets `"cooldownMs": 0` on the
 trigger so nothing is dropped.
 
+### Cron reports with Slack follow-ups
+
+A report destination is a named Slack trigger with `threadsOnly: true` and a
+`reportAgents` list of cron trigger names. The Slack bot must be a member of the
+private channel with `chat:write`, `groups:history`, and `reactions:write`.
+`users:read` lets C3 display the reply author's name.
+If the workspace requires a user credential for `conversations.replies`, set
+`slackThreadReadToken` to a server-side environment reference for a channel
+member's user token with `groups:history`. Posts and reactions use the bot.
+
+The cron agent calls `POST /api/webhooks/slack-report` with `CCC_WEBHOOK_SECRET`
+as bearer auth and `{trigger, sessionId, head, body?, idempotencyKey}`. Use the
+live `C3_TRIGGER_SESSION_ID` and keep the same key for each retry of a report.
+The endpoint returns the Slack `{ts, permalink}`. C3 links the thread to the
+reporting session when Slack confirms the head and holds follow-ups while the
+body chunks post. An identical retry returns the original result or resumes
+from confirmed delivery progress. An uncertain Slack send returns
+`slack_delivery_unknown`. Changing the payload under the same retained key
+in the same channel returns `idempotency_key_conflict`. Report delivery records
+expire after 30 days.
+
+The poller watches bot-authored parents from the last 14 days. Human replies
+resume the linked session, or start and link a session if the transcript is
+gone. File replies include their names or permalinks. A busy reply is retried
+on the next poll. The poller adds `eyes` after the webhook accepts the reply
+and continues if Slack refuses the reaction. Only the bot's `eyes` counts.
+The webhook requires the reply's `messageTs` and uses it to deduplicate
+retries. C3 saves an answer record before each run and posts answers in the
+same Slack thread. After a restart, C3 recovers pending answers from saved
+text or the session transcript and posts a failure notice for interrupted
+runs. For rate-limited answers, C3 waits for `Retry-After` or uses a default
+delay if Slack omits the header. C3 holds and logs unconfirmed Slack writes
+for reconciliation. Answer records expire after 30 days.
+
+Slack reports and answers omit C3 URLs and stay in Slack. For Mentorly
+destinations, C3 also removes IdeaPlaces names and links. Set
+`"workspace": "mentorly"` on a trigger if its project path is outside
+`mentorly-meta`.
+
 ### Answering a Slack alert in Discord instead of Slack
 
 A Slack trigger can carry `discordChannelId`. When it does, C3 copies the alert
