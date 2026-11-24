@@ -24,6 +24,7 @@ export async function POST(request: Request) {
 
   const trigger = getSlackTriggerByName(report.trigger)
   if (!trigger) return Response.json({ error: 'Slack trigger not configured' }, { status: 404 })
+  if (trigger.threadsOnly !== true) return Response.json({ error: 'Slack trigger must be threads-only' }, { status: 400 })
 
   try {
     const { body, status } = await publishSlackReport(trigger, report)

@@ -1,32 +1,81 @@
 import { slackifyMarkdown } from 'slackify-markdown'
+import type { SlackTrigger } from '@/lib/triggers/config'
 
 export function slackThreadKey(channelId: string, threadTs: string): string {
   return `slack:${channelId}:${threadTs}`
 }
 
-function hostOf(url: string): string | undefined {
+function parseLink(url: string): URL | undefined {
   try {
-    return new URL(url).hostname.toLowerCase()
+    return new URL(url.startsWith('//') ? `https:${url}` : url)
   } catch {
     return undefined
   }
 }
 
-export function formatSlackReport(markdown: string): string {
+function hostOf(url: string): string | undefined {
+  return parseLink(url)?.hostname.toLowerCase().replace(/\.$/, '')
+}
+
+function decodeLinkPart(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+export function formatSlackReport(markdown: string, trigger?: Pick<SlackTrigger, 'workspace' | 'projectPath'>): string {
+  const mentorly = trigger?.workspace
+    ? trigger.workspace.toLowerCase() === 'mentorly'
+    : /(?:^|\/)mentorly-meta(?:\/|$)/i.test(trigger?.projectPath || '')
   const c3Hosts = new Set([
-    'c3.ideaplaces.com', 'localhost', hostOf(process.env.C3_BASE_URL || ''), hostOf(process.env.CCC_URL || ''),
+    'c3.ideaplaces.com', 'localhost',
+    hostOf(process.env.C3_BASE_URL || ''), hostOf(process.env.CCC_URL || ''),
+    hostOf(process.env.NEXT_PUBLIC_BASE_URL || ''),
   ].filter((host): host is string => Boolean(host)))
-  const hosts = [...c3Hosts].map(host => host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-  const bareC3Url = new RegExp(`(?<![\\w.-])(?:${hosts})(?![\\w-]|\\.[\\w-])(?::\\d+)?(?:/[^\\s<>|\x60*]*)?`, 'gi')
-  return slackifyMarkdown(markdown)
-    .replace(/<(https?:\/\/[^<>\s|]+)(?:\|([^<>]*))?>|https?:\/\/[^\s<>`]+/gi, (match, link?: string, label?: string) => {
-      const url = link || match
-      const host = hostOf(url)
-      if (!(host && c3Hosts.has(host)) && !url.match(bareC3Url)) return match
-      return (label || '').replace(/https?:\/\/[^\s<>`]+/gi, '')
+  const ideaPlacesName = /\bideaplaces\b/i
+  const hosts = [...c3Hosts].map(host => host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (mentorly) hosts.unshift('(?:[a-z0-9-]+\\.)*ideaplaces\\.com')
+  const bareHost = `(?<![\\w.-])(?:${hosts.join('|')})(?![\\w-]|\\.[\\w-])\\.?(?::\\d+)?(?:[/?#][^\\s<>|\\x60*)\\]]*)?`
+  const embeddedHost = new RegExp(bareHost, 'i')
+  const isInternal = (url: string) => {
+    const link = parseLink(url)
+    if (!link) return false
+    const host = link.hostname.toLowerCase().replace(/\.$/, '')
+    if (c3Hosts.has(host)) return true
+    if (!mentorly) return embeddedHost.test(url)
+    const target = decodeLinkPart(link.pathname + link.search + link.hash)
+    return ideaPlacesName.test(host) || ideaPlacesName.test(target) || embeddedHost.test(target)
+  }
+  const bareHostPattern = new RegExp(bareHost, 'gi')
+  const stripBare = (value: string) => {
+    const stripped = value.replace(bareHostPattern, '')
+    return mentorly ? stripped.replace(/\bideaplaces\b/gi, '') : stripped
+  }
+  const prefix = String.raw`(?:[a-z][a-z\d+.-]*:)?//`
+  const slackLink = String.raw`<(${prefix}[^<>\s|]+)(?:\|([^<>]*))?>`
+  const rawMarkdownLink = String.raw`!?\[([^\]\n]*)\]\(<?(${prefix}(?:[^\s<>()]|\([^\s<>()]*\))+)>?(?:\s+["'][^\n]*?["'])?\)`
+  const linkOrBare = new RegExp([
+    rawMarkdownLink, slackLink, String.raw`(${prefix}[^\s<>\x60*)\]]+)`,
+    bareHost, ...(mentorly ? [String.raw`\bideaplaces\b`] : []),
+  ].join('|'), 'gi')
+  const scrub = (text: string) => text.replace(linkOrBare,
+    (match, rawLabel?: string, rawUrl?: string, url?: string, label?: string, bareUrl?: string) => {
+      const href = rawUrl || url || bareUrl
+      if (!href) return ''
+      if (isInternal(href)) return mentorly ? '' : stripBare(rawLabel || label || '')
+      if (rawLabel) return match.replace(rawLabel, stripBare(rawLabel))
+      if (label !== undefined) return `<${url}|${stripBare(label) || url}>`
+      return match
     })
-    .replace(bareC3Url, '')
-    .trim()
+  const input = scrub(markdown)
+  try {
+    return scrub(slackifyMarkdown(input)).trim()
+  } catch (err) {
+    if (!(err instanceof URIError)) throw err
+    return input.trim()
+  }
 }
 
 /** Slack recommends keeping chat.postMessage text under 4,000 characters. */
@@ -46,6 +95,7 @@ async function slackRequest(token: string, endpoint: string, body?: object) {
       method: body ? 'POST' : 'GET',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15_000),
     })
     if (response.status === 429) {
       const retryAfter = response.headers.get('retry-after')

@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   if (typeof threadTs === 'string' && threadTs && typeof followUp === 'string' && followUp.trim()) {
-    if (messageTs !== undefined && (typeof messageTs !== 'string' || !/^\d+(?:\.\d+)?$/.test(messageTs))) {
+    if (typeof messageTs !== 'string' || !/^\d+(?:\.\d+)?$/.test(messageTs)) {
       return Response.json({ error: 'Invalid messageTs' }, { status: 400 })
     }
     return await handleSlackThreadReply(trigger, { threadTs, messageTs, message, author, followUp })

@@ -34,6 +34,11 @@ export async function pollSlackThreads(trigger: SlackTrigger, token: string, las
   return changed
 }
 
+function threadText(message: SlackMessage, author: string): string {
+  const files = (message.files || []).map(file => `(${author} attached a file: ${file.name || file.permalink || 'unnamed file'})`)
+  return [extractFullText(message).trim(), ...files].filter(Boolean).join('\n')
+}
+
 async function forwardThreadReplies(trigger: SlackTrigger, token: string, readToken: string, botUserId: string, parent: SlackMessage): Promise<boolean> {
   const { channelId, name } = trigger
   const replies = await slackConversationMessages(readToken, 'replies', { channel: channelId, ts: parent.ts, limit: '100' })
@@ -42,12 +47,12 @@ async function forwardThreadReplies(trigger: SlackTrigger, token: string, readTo
   const asLine = (message: SlackMessage) => ({
     author: message.user || 'unknown',
     isBot: Boolean(message.bot_id || message.user === botUserId || message.subtype === 'bot_message'),
-    content: extractFullText(message),
+    content: threadText(message, message.user || 'someone'),
   })
   for (const reply of repliesToForward(history, botUserId)) {
-    const followUp = extractFullText(reply).trim()
-    if (!followUp) continue
+    if (!extractFullText(reply).trim() && !reply.files?.length) continue
     const author = await getMessageAuthor(token, reply.user)
+    const followUp = threadText(reply, author)
     const result = await forwardToC3({
       channelId, channelName: name, threadTs: parent.ts, messageTs: reply.ts, author, followUp,
       message: composeThreadText(asLine(parent), history.filter(message => Number(message.ts) < Number(reply.ts)).map(asLine), author, followUp),
@@ -56,7 +61,13 @@ async function forwardThreadReplies(trigger: SlackTrigger, token: string, readTo
       console.log(`[Slack Poller] ${name} reply ${reply.ts} will retry (HTTP ${result.status})`)
       return false
     }
-    if (!await markAsProcessed(token, channelId, reply.ts)) return false
+    try {
+      if (!await markAsProcessed(token, channelId, reply.ts)) {
+        console.error(`[Slack Poller] ${name} accepted reply ${reply.ts} but could not mark it processed`)
+      }
+    } catch (err) {
+      console.error(`[Slack Poller] ${name} could not mark accepted reply ${reply.ts} processed:`, err)
+    }
   }
   return replies.some(reply => reply.ts === parent.latest_reply)
 }

@@ -40,7 +40,9 @@ const port = parseInt(process.env.PORT || '8347', 10)
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
 
-app.prepare().then(() => {
+async function startServer() {
+  await app.prepare()
+  const { startSlackAnswerRecovery } = await import('./src/lib/webhooks/slack-answer.js')
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true)
     handle(req, res, parsedUrl)
@@ -105,6 +107,9 @@ app.prepare().then(() => {
   })
 
   server.listen(port, hostname, () => {
+    startSlackAnswerRecovery()
     console.log(`> C3 server ready on http://${hostname}:${port}`)
   })
-})
+}
+
+void startServer()

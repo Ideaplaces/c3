@@ -14,6 +14,7 @@ export interface SlackMessage {
   reactions?: { name: string; users: string[] }[]
   blocks?: SlackBlock[]
   attachments?: SlackAttachment[]
+  files?: { name?: string; permalink?: string }[]
 }
 
 interface SlackBlock {
@@ -112,11 +113,13 @@ export function threadsWithNewReplies(
 }
 
 export function repliesToForward(replies: SlackMessage[], botUserId: string): SlackMessage[] {
-  const seen = new Set(replies.filter(hasProcessedReaction).map(reply => reply.ts))
+  const seen = new Set(replies.filter(reply => reply.reactions?.some(reaction =>
+    reaction.name === PROCESSED_REACTION && reaction.users?.includes(botUserId),
+  )).map(reply => reply.ts))
   return replies
     .filter(reply => reply.thread_ts && reply.ts !== reply.thread_ts
       && reply.user && reply.user !== botUserId && !reply.bot_id
-      && (!reply.subtype || reply.subtype === 'thread_broadcast'))
+      && (!reply.subtype || reply.subtype === 'thread_broadcast' || reply.subtype === 'file_share'))
     .filter(reply => {
       if (seen.has(reply.ts)) return false
       seen.add(reply.ts)

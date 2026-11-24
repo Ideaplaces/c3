@@ -38,9 +38,11 @@ export async function resumeOrStart(options: {
   reply?: string | null
   prompt: string | (() => string)
   startId?: string
+  prepareRun?: (sessionId: string, status: 'started' | 'resumed', prompt: string) => string
+  onLaunchRejected?: () => void
   onEnded?: SessionEndListener
 }): Promise<{ sessionId: string; status: 'busy' | 'resumed' | 'started' }> {
-  const { key, trigger, platform, author, reply, prompt, startId, onEnded } = options
+  const { key, trigger, platform, author, reply, prompt, startId, prepareRun, onLaunchRejected, onEnded } = options
   const resumable = key && reply ? resolveResumable(key, trigger.name) : null
   if (resumable && sessionManager.isSessionActive(resumable)) return { sessionId: resumable, status: 'busy' }
 
@@ -53,25 +55,36 @@ export async function resumeOrStart(options: {
     onEnded?.(sessionId, reason)
   }
   if (onEnded) sessionManager.on('session_ended', onSessionEnded)
+  let launching = false
   try {
     if (resumable && reply) {
-      await sessionManager.resumeSession(resumable, followUpPrompt(author, reply, platform), runOptions)
+      const composed = followUpPrompt(author, reply, platform)
+      const followUp = prepareRun ? prepareRun(resumable, 'resumed', composed) : composed
+      launching = true
+      await sessionManager.resumeSession(resumable, followUp, runOptions)
       console.log(`[Webhook] Resumed session ${resumable} for a reply in thread ${key} ("${trigger.name}")`)
       return { sessionId: resumable, status: 'resumed' }
     }
 
+    const firstPrompt = typeof prompt === 'function' ? prompt() : prompt
+    const preparedPrompt = prepareRun && startId ? prepareRun(startId, 'started', firstPrompt) : firstPrompt
+    launching = true
     const sessionId = await sessionManager.startSession({
       ...runOptions,
       ...(startId ? { sessionId: startId } : {}),
       projectPath: trigger.projectPath,
-      prompt: typeof prompt === 'function' ? prompt() : prompt,
+      prompt: preparedPrompt,
       permissionMode: trigger.permissionMode || 'bypassPermissions',
     })
+    launching = false
     if (key) linkThread(key, sessionId, trigger.name)
     console.log(`[Webhook] Started session ${sessionId} for trigger "${trigger.name}"`)
     return { sessionId, status: 'started' }
   } catch (err) {
     if (onEnded) sessionManager.removeListener('session_ended', onSessionEnded)
+    if (onLaunchRejected && launching && expectedId && !sessionManager.isSessionActive(expectedId)) {
+      onLaunchRejected()
+    }
     throw err
   }
 }

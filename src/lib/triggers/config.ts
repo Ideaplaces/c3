@@ -68,6 +68,8 @@ export interface ChannelTrigger {
 
 export interface SlackTrigger extends ChannelTrigger {
   slackBotToken?: string
+  /** Slack workspace name. Mentorly project paths also identify existing Mentorly triggers. */
+  workspace?: string
   pollIntervalMs?: number
   /** Watch only replies to bot-authored thread parents. */
   threadsOnly?: boolean

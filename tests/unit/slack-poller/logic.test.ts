@@ -5,6 +5,7 @@ import {
   checkCooldown,
   shouldProcessMessage,
   extractFullText,
+  oldestReportThread,
   repliesToForward,
   threadsWithNewReplies,
   isProcessed,
@@ -16,6 +17,10 @@ import {
 } from '@/lib/slack-poller/logic'
 
 describe('Slack report threads', () => {
+  it('looks back exactly 14 days in Slack timestamp seconds', () => {
+    expect(oldestReportThread(20 * 86_400_000 + 123)).toBe(6 * 86_400 + 0.123)
+  })
+
   it('finds only recent bot parents whose latest reply has changed', () => {
     const now = Date.parse('2026-11-24T00:00:00Z')
     const parent = (daysAgo: number, fields: Partial<SlackMessage> = {}): SlackMessage => ({
@@ -41,9 +46,17 @@ describe('Slack report threads', () => {
     expect(repliesToForward([
       parent, broadcast, first, broadcast,
       reply('4.000001', { user: 'UBOT' }), reply('5.000001', { bot_id: 'B2' }),
-      reply('6.000001', { reactions: [{ name: 'eyes', users: ['U2'] }] }),
+      reply('6.000001', { reactions: [{ name: 'eyes', users: ['U2', 'UBOT'] }] }),
       reply('7.000001', { subtype: 'message_deleted' }),
     ], 'UBOT')).toEqual([first, broadcast])
+  })
+
+  it('forwards a reply even if a human has already reacted with eyes', () => {
+    const reply = {
+      text: 'reply', ts: '2.000001', thread_ts: '1.000001', user: 'U1',
+      reactions: [{ name: 'eyes', users: ['U2'] }],
+    }
+    expect(repliesToForward([reply], 'UBOT')).toEqual([reply])
   })
 })
 
