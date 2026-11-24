@@ -176,12 +176,14 @@ describe('Slack report webhook', () => {
       'https://ideaplaces.slack.com/archives/C123',
       '[Other repository](https://github.com/another-org/example)',
       'https://ideaplaces.com should be removed',
-      'https://notideaplaces.com should stay',
+      'https://notideaplaces.com is removed too, the name is in it',
+      'https://example.org should stay',
     ].join('\n')
     expect((await post({ head: 'Report', body })).status).toBe(200)
     const text = JSON.parse(String(slack.mock.calls[1][1]?.body)).text
     expect(text).toContain(head)
-    expect(text).toContain('https://notideaplaces.com should stay')
+    expect(text).toContain('https://example.org should stay')
+    expect(text).not.toMatch(/ideaplaces/i)
     expect(text).toContain('[Other repository](https://github.com/another-org/example)')
     expect(text).not.toMatch(/Angle-wrapped|Titled link|Private repository|team-c3\.example|ideaplaces\.com\/private|target=|https:\/\/ideaplaces\./)
   })
