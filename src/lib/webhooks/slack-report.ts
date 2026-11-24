@@ -56,10 +56,12 @@ async function publish(file: string, key: string, fingerprint: string, trigger: 
   }
 
   if (!saved) {
-    const label = sessionManager.getActiveSession(report.sessionId)?.label
-    if (!label?.startsWith('cron:') || !Array.isArray(trigger.reportAgents) || !trigger.reportAgents.includes(label.slice(5))) {
+    // A live run of a cron trigger or of a Slack trigger (an alert channel) on the allowlist, never
+    // a session of the destination itself.
+    const agent = /^(?:cron|slack):(.+)$/.exec(sessionManager.getActiveSession(report.sessionId)?.label ?? '')?.[1]
+    if (!agent || agent === trigger.name || !Array.isArray(trigger.reportAgents) || !trigger.reportAgents.includes(agent)) {
       console.warn(`[Slack Report] Session ${report.sessionId} cannot report to ${trigger.name}`)
-      return { status: 403, body: { error: 'Session is not an allowed live cron run' } }
+      return { status: 403, body: { error: 'Session is not an allowed live run' } }
     }
   }
 
