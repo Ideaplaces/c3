@@ -16,7 +16,7 @@ it('retains the original formatting behavior when no destination is supplied', (
   expect(formatSlackReport('See [the session](https://c3.ideaplaces.com/sessions/abc)')).toBe('See the session')
 })
 
-test('the IdeaPlaces name never reaches the Mentorly workspace, joined to other words included', () => {
+it('the IdeaPlaces name never reaches the Mentorly workspace, joined to other words included', () => {
   const mentorly = { projectPath: '~/mentorly-meta' }
   for (const text of ['Fixed in ideaplaces_meta and C3_IDEAPLACES_TOKEN', 'IdeaPlacesMeta repo', 'see IdeaPlaces']) {
     expect(formatSlackReport(text, mentorly)).not.toMatch(/ideaplaces/i)
@@ -69,14 +69,19 @@ describe('Slack report webhook', () => {
 
   it('rejects unauthenticated requests and sessions outside the cron allowlist', async () => {
     expect((await post({}, 'wrong')).status).toBe(401)
-    for (const active of [undefined, { label: 'cron:other' }, { label: 'slack:daily' }]) {
+    for (const active of [undefined, { label: 'cron:other' }, { label: 'slack:other' }, { label: 'web:daily' }, { label: 'slack:reports' }]) {
       getActiveSession.mockReturnValue(active)
       expect((await post()).status).toBe(403)
     }
-    expect(getActiveSession.mock.calls).toEqual(Array.from({ length: 3 }, () => [report.sessionId]))
+    expect(getActiveSession.mock.calls).toEqual(Array.from({ length: 5 }, () => [report.sessionId]))
     vi.stubEnv('CCC_WEBHOOK_SECRET', undefined)
     expect((await post({}, 'undefined')).status).toBe(401)
     expect(slack).not.toHaveBeenCalled()
+  })
+
+  it('lets a session started by a Slack trigger on the allowlist report, like a cron run', async () => {
+    getActiveSession.mockReturnValue({ label: 'slack:daily' })
+    expect((await post()).status).toBe(200)
   })
 
   it('returns the first result for concurrent and later replays of the same report', async () => {
