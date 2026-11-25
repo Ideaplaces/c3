@@ -160,6 +160,7 @@ describe('routeMessage', () => {
     { name: 'reports', channelId: 'C4', thread: true, webhookId: 'W' },
     { name: 'on-a-thread', channelId: 'T9', thread: true },
     { name: 'named', channelId: 'CN', thread: true, bot: 'spotter' },
+    { name: 'named-on-a-thread', channelId: 'TN', bot: 'spotter' },
   ]
   const base = { channelId: 'C1', parentId: null as string | null, isThread: false, isSelf: false, isSystem: false, authorIsBot: false }
   const route = (over: Partial<typeof base>, botName?: string) => {
@@ -196,6 +197,18 @@ describe('routeMessage', () => {
     expect(route({ channelId: 'T1', parentId: 'C8', isThread: true }, 'spotter')).toBe('ignore')
     expect(route({ channelId: 'T1', parentId: 'CN', isThread: true }, 'spotter')).toBe('thread:named')
     expect(route({ channelId: 'T1', parentId: 'CN', isThread: true })).toBe('ignore')
+  })
+  it.each([
+    ['channel', { channelId: 'CN' }, 'channel:named'],
+    ['directly configured thread', { channelId: 'TN', parentId: 'C1', isThread: true }, 'channel:named-on-a-thread'],
+  ] as const)('routes a named bot\'s %s only to that bot', (_kind, message, expected) => {
+    expect(route(message)).toBe('ignore')
+    expect(route(message, 'spotter')).toBe(expected)
+  })
+  it('gives a parent trigger without a bot name to the default bot only', () => {
+    const thread = { channelId: 'T1', parentId: 'C1', isThread: true }
+    expect(route(thread, 'spotter')).toBe('ignore')
+    expect(route(thread)).toBe('thread:fan')
   })
 })
 

@@ -3,7 +3,7 @@ import { DEFAULT_MODEL } from '@/lib/models'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSession } from '@/lib/store/sessions'
 import type { ChannelTrigger } from '@/lib/triggers/config'
-import { followUpPrompt, isThreadLinkExpired, linkThread, sessionForThread, type ThreadLink } from './discord-threads'
+import { followUpPrompt, isHomeThreadLabel, isThreadLinkExpired, linkThread, sessionForThread, type ThreadLink } from './discord-threads'
 
 const busyThreads = new Set<string>()
 
@@ -20,7 +20,8 @@ export async function withThreadLock<T>(key: string | null, handle: () => Promis
 }
 
 export function resolveResumable(key: string, triggerName: string): string | null {
-  const linked = sessionForThread(key)
+  const link = sessionForThread(key)
+  const linked = link && isHomeThreadLabel(link.trigger) ? link.discordChannel : link
   if (!linked || linked.trigger !== triggerName) return null
   const { sessionId } = linked
   // A live cron session can post its Slack report before its transcript is on disk.

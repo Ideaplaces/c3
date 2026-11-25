@@ -9,21 +9,26 @@ import { chipAsks, runFailed } from './report-asks'
  * Claude Code session, and everything is on top of that same session").
  *
  * Kept on disk next to the triggers, so a restart of the server or the bot
- * does not break a conversation that is still going. Expired home links retain
- * the original session ID so a late reply can be pointed back to it.
+ * does not break a conversation that is still going. A report and a channel
+ * conversation can share a Discord thread, with a separate session for each.
  */
-export interface ThreadLink {
+interface ThreadSession {
   sessionId: string
   trigger: string
   linkedAt: string
+}
+
+export interface ThreadLink extends ThreadSession {
+  discordChannel?: ThreadSession
   slackReplies?: Record<string, { sessionId: string; status: 'started' | 'resumed' }>
   discordReplies?: Record<string, 'pending' | 'resumed'>
 }
 
 const MAX_AGE_MS = 30 * 86_400_000
+const HOME_RETENTION_MS = 60 * 86_400_000
 
-export function isThreadLinkExpired(link: ThreadLink, now = new Date()): boolean {
-  return !(Date.parse(link.linkedAt) >= now.getTime() - MAX_AGE_MS)
+export function isThreadLinkExpired(link: ThreadSession, now = new Date(), maxAgeMs = MAX_AGE_MS): boolean {
+  return !(Date.parse(link.linkedAt) >= now.getTime() - maxAgeMs)
 }
 
 export function isHomeThreadLabel(label: string | undefined): label is `cron:${string}` | `slack:${string}` {
@@ -36,18 +41,55 @@ export function threadsFile(): string {
   return path.join(base, 'state', 'discord-threads.json')
 }
 
-function read(file: string, failOnError = false): Record<string, ThreadLink> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isNonemptyString(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim())
+}
+
+function isThreadSession(value: unknown): value is ThreadSession & Record<string, unknown> {
+  if (!isRecord(value)) return false
+  const { sessionId, trigger, linkedAt } = value
+  return isNonemptyString(sessionId) && isNonemptyString(trigger) &&
+    typeof linkedAt === 'string' && Number.isFinite(Date.parse(linkedAt))
+}
+
+function isThreadLink(value: unknown): boolean {
+  if (!isThreadSession(value)) return false
+  const { discordChannel, discordReplies, slackReplies } = value
+  if (discordChannel !== undefined && !isThreadSession(discordChannel)) return false
+  if (discordReplies !== undefined && (!isRecord(discordReplies) ||
+      !Object.values(discordReplies).every(status => status === 'pending' || status === 'resumed'))) return false
+  return slackReplies === undefined || (isRecord(slackReplies) && Object.values(slackReplies).every(receipt =>
+    isRecord(receipt) && isNonemptyString(receipt.sessionId) && (receipt.status === 'started' || receipt.status === 'resumed'),
+  ))
+}
+
+function read(file: string): Record<string, ThreadLink> {
+  let contents: string
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8'))
+    contents = fs.readFileSync(file, 'utf-8')
   } catch (err) {
-    if (failOnError && (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    return {}
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw err
   }
+  const links: unknown = JSON.parse(contents)
+  if (!isRecord(links)) {
+    throw new Error(`Invalid thread links in ${file}`)
+  }
+  if (!Object.values(links).every(isThreadLink)) {
+    throw new Error(`Invalid thread link entry in ${file}`)
+  }
+  return links as Record<string, ThreadLink>
 }
 
 export function sessionForThread(threadId: string, file = threadsFile()): ThreadLink | null {
   const links = read(file)
-  return Object.hasOwn(links, threadId) ? links[threadId] : null
+  if (!Object.hasOwn(links, threadId)) return null
+  const link = links[threadId]
+  return isHomeThreadLabel(link.trigger) ? retainedHomeLink(link, new Date()) ?? null : link
 }
 
 export function linkThread(threadId: string, sessionId: string, trigger: string, now = new Date(), file = threadsFile()): void {
@@ -74,16 +116,36 @@ export function recordHomeThreadReply(
 }
 
 function saveLink(threadId: string, link: ThreadLink, now: Date, file: string): void {
-  const links = Object.entries(read(file, true)).flatMap(([id, existing]) => {
-    if (!isThreadLinkExpired(existing, now)) return [[id, existing]]
-    if (!isHomeThreadLabel(existing.trigger)) return []
-    const { sessionId, trigger, linkedAt } = existing
-    return [[id, { sessionId, trigger, linkedAt }]]
-  })
+  const links = new Map<string, ThreadLink>()
+  for (const [id, existing] of Object.entries(read(file))) {
+    if (existing.discordChannel && isThreadLinkExpired(existing.discordChannel, now)) delete existing.discordChannel
+    const retained = isHomeThreadLabel(existing.trigger)
+      ? retainedHomeLink(existing, now)
+      : isThreadLinkExpired(existing, now) ? undefined : existing
+    if (retained) links.set(id, retained)
+  }
+
+  const existing = links.get(threadId)
+  if (existing && isHomeThreadLabel(existing.trigger)) {
+    if (!isHomeThreadLabel(link.trigger)) {
+      links.set(threadId, { ...existing, discordChannel: link })
+    } else if (existing.sessionId === link.sessionId) {
+      links.set(threadId, { ...link, discordChannel: existing.discordChannel })
+    }
+  } else {
+    links.set(threadId, existing && isHomeThreadLabel(link.trigger) ? { ...link, discordChannel: existing } : link)
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries([...links, [threadId, link]]), null, 1) + '\n')
+  fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(links), null, 1) + '\n')
   fs.renameSync(tmp, file)
+}
+
+function retainedHomeLink(link: ThreadLink, now: Date): ThreadLink | undefined {
+  if (isThreadLinkExpired(link, now, HOME_RETENTION_MS)) return link.discordChannel
+  const { sessionId, trigger, linkedAt, discordChannel } = link
+  if (isThreadLinkExpired(link, now)) return { sessionId, trigger, linkedAt, discordChannel }
+  return link
 }
 
 /** The turn a resumed session receives: only the new message, since it already has the rest. */

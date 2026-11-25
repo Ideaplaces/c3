@@ -50,6 +50,16 @@ describe('POST /api/webhooks/inbox', () => {
     expect((await call({ ...valid, sourceMessageId: undefined })).status).toBe(400)
   })
 
+  it.each(['sessionId', 'sourceMessageId', 'sourceChannelId', 'text'])('rejects empty and whitespace-only %s', async (field) => {
+    getActiveSession.mockReturnValue({ label: 'cron:daily' })
+    for (const value of ['', ' \t\n ']) {
+      const response = await call({ ...valid, [field]: value })
+      expect(response.status).toBe(400)
+    }
+    expect(getActiveSession).not.toHaveBeenCalled()
+    expect(sessionForThread('M1')).toBeNull()
+  })
+
   it('links a live cron run by message ID, even before a thread exists, and leaves the link untouched on retry', async () => {
     getActiveSession.mockReturnValue({ label: 'cron:daily' })
     getSession.mockReturnValue({ source: 'slack:old' })
@@ -64,10 +74,13 @@ describe('POST /api/webhooks/inbox', () => {
     expect(readFileSync(file, 'utf-8')).toBe(saved)
   })
 
-  it('links a finished Slack run using its stored source', async () => {
-    getSession.mockReturnValue({ source: 'slack:alerts' })
-    expect(await (await call(valid)).json()).toEqual({ status: 'linked' })
-    expect(sessionForThread('M1')).toMatchObject({ sessionId: 'S1', trigger: 'slack:alerts' })
+  it.each([undefined, { label: 'web' }, { label: 'web:daily' }])('rejects a stored cron source when the active session is %j', async (active) => {
+    getActiveSession.mockReturnValue(active)
+    getSession.mockReturnValue({ source: 'cron:daily' })
+    const response = await call(valid)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'not-a-trigger-run' })
+    expect(sessionForThread('M1')).toBeNull()
   })
 
   it('acknowledges web and missing sessions without trusting the agent hint', async () => {
@@ -87,6 +100,44 @@ describe('POST /api/webhooks/inbox', () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({ status: 'conflict' })
     expect(sessionForThread('M1')?.sessionId).toBe('original')
+  })
+
+  it('acknowledges an inactive session claim even if the report is already linked', async () => {
+    linkThread('M1', 'original', 'cron:daily')
+    getSession.mockReturnValue({ source: 'cron:daily' })
+    const response = await call(valid)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'not-a-trigger-run' })
+    expect(sessionForThread('M1')?.sessionId).toBe('original')
+  })
+
+  it('refuses a web label before checking for a conflicting report link', async () => {
+    linkThread('M1', 'original', 'cron:daily')
+    getActiveSession.mockReturnValue({ label: 'web:daily' })
+    const response = await call(valid)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'not-a-trigger-run' })
+    expect(sessionForThread('M1')?.sessionId).toBe('original')
+  })
+
+  it('registers reports in watch channels that have already started a channel conversation', async () => {
+    linkThread('M1', 'conversation', 'superfan-tour-calls')
+    getActiveSession.mockReturnValue({ label: 'slack:alerts' })
+    const response = await call(valid)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'linked' })
+    expect(sessionForThread('M1')).toMatchObject({
+      sessionId: 'S1', trigger: 'slack:alerts', discordChannel: { sessionId: 'conversation', trigger: 'superfan-tour-calls' },
+    })
+  })
+
+  it('registers a home link when only a channel conversation with the same session ID exists', async () => {
+    linkThread('M1', 'S1', 'channel-conversation')
+    getActiveSession.mockReturnValue({ label: 'slack:alerts' })
+    const response = await call(valid)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'linked' })
+    expect(sessionForThread('M1')).toMatchObject({ sessionId: 'S1', trigger: 'slack:alerts' })
   })
 
   it('reports a storage failure so the poster can keep the report in its outbox', async () => {

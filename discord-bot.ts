@@ -150,7 +150,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
 
   const like = toLike(msg)
   const originReply = msg.channel.isThread() && !msg.author.bot
-    ? { threadId: msg.channel.id, messageId: msg.id, text: extractDiscordText(like) }
+    ? { threadId: msg.channel.id, parentChannelId: msg.channel.parentId, messageId: msg.id, text: extractDiscordText(like) }
     : undefined
 
   async function skipChannelTrigger(reason: string) {
@@ -220,7 +220,7 @@ async function startSession(msg: Message, options: {
   followUp?: string
   threadCreated?: boolean
   homeThread?: boolean
-  originReply?: { threadId: string; messageId: string; text: string }
+  originReply?: { threadId: string; parentChannelId: string | null; messageId: string; text: string }
 }) {
   const { channelId, text, subjectId, threadId, announce, followUp, threadCreated = false, homeThread, originReply } = options
   try {
@@ -257,8 +257,12 @@ async function startSession(msg: Message, options: {
       return { started: false, reason: data.status }
     }
     if (response.ok && data.sessionId) {
-      const pendingThreadId = data.status === 'resumed' ? originReply?.threadId ?? threadId : threadId
-      pendingSessions.set(data.sessionId, { channelId, messageId: subjectId, threadId: pendingThreadId, startedAt: Date.now() })
+      const homeResume = data.status === 'resumed' && originReply
+      const pendingThreadId = homeResume ? originReply.threadId : threadId
+      const pendingMessageId = homeResume ? originReply.messageId : subjectId
+      pendingSessions.set(`${data.sessionId}:${pendingMessageId}`, {
+        channelId, messageId: pendingMessageId, threadId: pendingThreadId, startedAt: Date.now(),
+      })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
       if (followUp) await react(msg, '👀')
       if (threadId && announce && data.status !== 'resumed') {
@@ -359,12 +363,13 @@ function readJsonBody(req: http.IncomingMessage): Promise<string> {
 // in the payload); this path covers the case where it does not.
 async function onSessionCallback(body: string) {
   const data = JSON.parse(body) as {
-    sessionId: string; reason: string; summary: string; projectPath?: string
+    sessionId: string; messageId: string; reason: string; summary: string; projectPath?: string
     failed?: boolean; failureReason?: string; replied?: boolean; nonce?: string
   }
-  const pending = pendingSessions.get(data.sessionId)
+  const pendingKey = `${data.sessionId}:${data.messageId}`
+  const pending = pendingSessions.get(pendingKey)
   if (!pending) return
-  pendingSessions.delete(data.sessionId)
+  pendingSessions.delete(pendingKey)
   if (data.replied) return
 
   const content = formatSessionResult(data, BASE_URL)

@@ -24,23 +24,28 @@ export async function POST(request: Request) {
     followUp?: string
     homeThread?: boolean
     /** The reply's own thread when a trigger is configured directly on it. */
-    originReply?: { threadId: string; messageId: string; text: string }
+    originReply?: { threadId: string; parentChannelId?: string | null; messageId: string; text: string }
   }
   const reply = typeof followUp === 'string' && followUp.trim() ? followUp : null
-  if (!channelId || (!message && !(threadId && reply))) {
+  const replyThreadId = originReply?.threadId || threadId
+  const isThreadReply = replyThreadId && (homeThread === true || Boolean(originReply) || typeof followUp === 'string')
+  if (!channelId || (!message && !isThreadReply)) {
     return Response.json({ error: 'Missing channelId or message' }, { status: 400 })
   }
 
-  const replyThreadId = originReply?.threadId || threadId
-  const replyText = originReply?.text || reply
-  if (replyThreadId && replyText) {
+  const trigger = getChannelTrigger(channelId)
+  let parentTrigger = trigger
+  if (originReply) parentTrigger = originReply.parentChannelId ? getChannelTrigger(originReply.parentChannelId) : null
+  if (replyThreadId && isThreadReply && !parentTrigger?.thread) {
     const link = sessionForThread(replyThreadId)
     if (link && isHomeThreadLabel(link.trigger)) {
+      const replyText = originReply?.text ?? reply
+      if (!replyText?.trim()) return Response.json({ status: 'ignored' })
       const replyMessageId = originReply?.messageId ?? messageId
       if (typeof replyMessageId !== 'string' || !replyMessageId.trim()) {
         return Response.json({ error: 'Missing messageId for a linked reply' }, { status: 400 })
       }
-      const configuredToken = homeThread === true && !originReply ? undefined : getChannelTrigger(channelId)?.discordBotToken
+      const configuredToken = homeThread === true && !originReply ? undefined : trigger?.discordBotToken
       const token = configuredToken || process.env.DISCORD_BOT_TOKEN
       return await handleHomeReply({
         threadId: replyThreadId, link, messageId: replyMessageId, reply: replyText, author: author || 'someone', token,
@@ -53,7 +58,6 @@ export async function POST(request: Request) {
   }
   if (homeThread === true) return Response.json({ status: 'ignored' })
 
-  const trigger = getChannelTrigger(channelId)
   if (!trigger) {
     if (replyThreadId) return Response.json({ status: 'ignored' })
     console.log(`[Webhook] No trigger configured for channel ${channelId}`)
@@ -158,7 +162,7 @@ async function postSessionResult(options: {
       await fetch(callbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...result, replied, nonce }),
+        body: JSON.stringify({ ...result, replied, nonce, messageId }),
       })
     }
   } catch (err) {

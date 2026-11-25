@@ -1,3 +1,5 @@
+import { sessionManager } from '@/lib/sdk/session-manager'
+import { isHomeThreadLabel } from '@/lib/webhooks/discord-threads'
 import { linkHomeThread } from '@/lib/webhooks/home-thread'
 
 /**
@@ -29,7 +31,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const status = linkHomeThread(sourceMessageId, sessionId)
+    const label = sessionId ? sessionManager.getActiveSession(sessionId)?.label : undefined
+    if (!sessionId || !isHomeThreadLabel(label)) return Response.json({ status: 'not-a-trigger-run' })
+    const status = linkHomeThread(sourceMessageId, sessionId, label)
     return Response.json({ status }, { status: status === 'conflict' ? 409 : 200 })
   } catch (err) {
     console.error(`[Discord Home Thread] Could not link report ${sourceMessageId}:`, err)

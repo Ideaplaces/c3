@@ -1,23 +1,17 @@
 import { sessionManager } from '@/lib/sdk/session-manager'
-import { getSession } from '@/lib/store/sessions'
 import { getCronTrigger, getSlackTriggerByName } from '@/lib/triggers/config'
 import { runningCronSession } from '@/lib/triggers/fire'
 import { nonceFor, postDiscordMessage } from './discord-mirror'
 import { isHomeThreadLabel, linkThread, recordHomeThreadReply, sessionForThread, type ThreadLink } from './discord-threads'
 import { resumeOnly, withThreadLock } from './thread-session'
 
-export function linkHomeThread(messageId: string, sessionId?: string): 'linked' | 'already' | 'not-a-trigger-run' | 'conflict' {
-  if (!sessionId) return 'not-a-trigger-run'
+export function linkHomeThread(messageId: string, sessionId: string, label: `cron:${string}` | `slack:${string}`): 'linked' | 'already' | 'conflict' {
   const existing = sessionForThread(messageId)
-  if (existing && existing.sessionId !== sessionId) {
+  if (existing && isHomeThreadLabel(existing.trigger)) {
+    if (existing.sessionId === sessionId) return 'already'
     console.warn(`[Discord Home Thread] Refused to relink ${messageId} from ${existing.sessionId} to ${sessionId}`)
     return 'conflict'
   }
-  if (existing && isHomeThreadLabel(existing.trigger)) return 'already'
-
-  const liveLabel = sessionManager.getActiveSession(sessionId)?.label
-  const label = isHomeThreadLabel(liveLabel) ? liveLabel : getSession(sessionId)?.source
-  if (!isHomeThreadLabel(label)) return 'not-a-trigger-run'
   linkThread(messageId, sessionId, label)
   console.log(`[Discord Home Thread] Linked ${messageId} to ${sessionId} (${label})`)
   return 'linked'
