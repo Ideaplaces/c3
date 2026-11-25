@@ -16,7 +16,7 @@ import {
   formatInvestigationReply,
   postDiscordChunked,
 } from '@/lib/webhooks/discord-mirror'
-import { mirrorPostToInbox } from '@/lib/inbox/discord'
+import { linkHomeThread } from '@/lib/webhooks/home-thread'
 import { handleSlackThreadReply } from '@/lib/webhooks/slack-thread-reply'
 import { extractSessionSummary } from '@/lib/webhooks/thread-session'
 
@@ -188,38 +188,42 @@ export async function POST(request: Request) {
       `Watch live: ${baseUrl}/sessions/${sessionId}`,
     ].join('\n')
 
-    fetch('https://slack.com/api/chat.postMessage', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${slackBotToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        channel: channelId,
-        thread_ts: messageTs,
-        reply_broadcast: false,
-        text: startMessage,
-        unfurl_links: false,
-      }),
-    })
-      .then(res => res.json())
-      .then((data: Record<string, unknown>) => {
+    async function notifyStarted() {
+      try {
+        const response = await fetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${slackBotToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: channelId,
+            thread_ts: messageTs,
+            reply_broadcast: false,
+            text: startMessage,
+            unfurl_links: false,
+          }),
+        })
+        const data = await response.json()
         if (data.ok) {
           console.log(`[Slack Webhook] Session start notification sent for ${sessionId}`)
         } else {
           console.error(`[Slack Webhook] Start notification failed:`, data.error)
         }
-      })
-      .catch(err => console.error(`[Slack Webhook] Start notification error:`, err))
+      } catch (err) {
+        console.error('[Slack Webhook] Start notification error:', err)
+      }
+    }
+    void notifyStarted()
   }
 
   // On completion: reply to the Slack thread with findings, OR with a failure
   // notice if the session died before producing meaningful output. The failure
   // notice ALWAYS goes out (even when replyInThread is false) so a silent agent
-  // crash never goes unseen — but on a DM-only trigger it goes to the DM, not
+  // crash never goes unseen. On a DM-only trigger it goes to the DM, not
   // into the shared alert channel where the whole team reads it.
   if (mirrorToDiscord) {
-    const onDiscordSessionEnded = (sid: string, reason: string) => {
+    const onDiscordSessionEnded = async (sid: string, reason: string) => {
       if (sid !== sessionId) return
       sessionManager.removeListener('session_ended', onDiscordSessionEnded)
       console.log(`[Slack Webhook] Session ${sessionId} ended (${reason})`)
@@ -238,7 +242,7 @@ export async function POST(request: Request) {
         resumeCommand,
       })
 
-      void (async () => {
+      try {
         const posted = await postDiscordChunked(
           discordBotToken as string,
           discordChannelId as string,
@@ -250,13 +254,7 @@ export async function POST(request: Request) {
             `[Slack Webhook] Posted report to Discord ${discordChannelId} for ${sessionId}` +
             ` (failed=${failure.failed})`,
           )
-          await mirrorPostToInbox({
-            sourceChannelId: discordChannelId as string,
-            sourceMessageId: posted,
-            text: failure.failed ? `Run failed: ${failure.reason.slice(0, 200)}` : body,
-            agent: `slack:${trigger.name}`,
-            sessionId,
-          })
+          linkHomeThread(posted, sessionId)
           return
         }
         // Degraded path only. Discord is the destination; a DM beats losing the
@@ -284,10 +282,10 @@ export async function POST(request: Request) {
             ].join('\n'),
             unfurl_links: false,
           }),
-        }).catch(err => console.error('[Slack Webhook] DM fallback error:', err))
-      })().catch(err =>
-        console.error(`[Slack Webhook] Discord report handling error for ${sessionId}:`, err),
-      )
+        })
+      } catch (err) {
+        console.error(`[Slack Webhook] Discord report handling error for ${sessionId}:`, err)
+      }
     }
 
     sessionManager.on('session_ended', onDiscordSessionEnded)
@@ -372,31 +370,32 @@ export async function POST(request: Request) {
         `[Slack Webhook] Posting notice: channel=${targetChannel} dm=${asDm}` +
         ` thread_ts=${targetThreadTs ?? 'none'} failed=${failure.failed}`,
       )
-      fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${slackBotToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          channel: targetChannel,
-          ...(targetThreadTs ? { thread_ts: targetThreadTs, reply_broadcast: false } : {}),
-          text: slackMessage,
-          unfurl_links: false,
-        }),
-      })
-        .then(res => res.json())
-        .then((data: Record<string, unknown>) => {
-          if (data.ok) {
-            console.log(`[Slack Webhook] Posted notice for session ${sessionId} (channel=${targetChannel}, dm=${asDm}, failed=${failure.failed})`)
-          } else {
-            console.error(
-              `[Slack Webhook] Slack post failed: ${data.error} channel=${targetChannel} dm=${asDm}` +
-              ` trigger=${trigger.name} token_prefix=${slackBotToken?.slice(0, 12)}...`,
-            )
-          }
+      try {
+        const response = await fetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${slackBotToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: targetChannel,
+            ...(targetThreadTs ? { thread_ts: targetThreadTs, reply_broadcast: false } : {}),
+            text: slackMessage,
+            unfurl_links: false,
+          }),
         })
-        .catch(err => console.error(`[Slack Webhook] Slack post error:`, err))
+        const data = await response.json()
+        if (data.ok) {
+          console.log(`[Slack Webhook] Posted notice for session ${sessionId} (channel=${targetChannel}, dm=${asDm}, failed=${failure.failed})`)
+        } else {
+          console.error(
+            `[Slack Webhook] Slack post failed: ${data.error} channel=${targetChannel} dm=${asDm}` +
+            ` trigger=${trigger.name} token_prefix=${slackBotToken?.slice(0, 12)}...`,
+          )
+        }
+      } catch (err) {
+        console.error('[Slack Webhook] Slack post error:', err)
+      }
     }
 
     sessionManager.on('session_ended', onSessionEnded)

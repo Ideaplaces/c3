@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { chipAsks, runFailed } from './report-asks'
 
 /**
  * Which Claude session a Discord or Slack thread belongs to. A thread is one
@@ -8,17 +9,26 @@ import path from 'path'
  * Claude Code session, and everything is on top of that same session").
  *
  * Kept on disk next to the triggers, so a restart of the server or the bot
- * does not break a conversation that is still going. Links older than
- * MAX_AGE_DAYS are dropped on write.
+ * does not break a conversation that is still going. Expired home links retain
+ * the original session ID so a late reply can be pointed back to it.
  */
 export interface ThreadLink {
   sessionId: string
   trigger: string
   linkedAt: string
   slackReplies?: Record<string, { sessionId: string; status: 'started' | 'resumed' }>
+  discordReplies?: Record<string, 'pending' | 'resumed'>
 }
 
-const MAX_AGE_DAYS = 30
+const MAX_AGE_MS = 30 * 86_400_000
+
+export function isThreadLinkExpired(link: ThreadLink, now = new Date()): boolean {
+  return !(Date.parse(link.linkedAt) >= now.getTime() - MAX_AGE_MS)
+}
+
+export function isHomeThreadLabel(label: string | undefined): label is `cron:${string}` | `slack:${string}` {
+  return Boolean(label && /^(cron|slack):.+$/.test(label))
+}
 
 export function threadsFile(): string {
   if (process.env.C3_DISCORD_THREADS_FILE) return process.env.C3_DISCORD_THREADS_FILE
@@ -26,16 +36,18 @@ export function threadsFile(): string {
   return path.join(base, 'state', 'discord-threads.json')
 }
 
-function read(file: string): Record<string, ThreadLink> {
+function read(file: string, failOnError = false): Record<string, ThreadLink> {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf-8'))
-  } catch {
+  } catch (err) {
+    if (failOnError && (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return {}
   }
 }
 
 export function sessionForThread(threadId: string, file = threadsFile()): ThreadLink | null {
-  return read(file)[threadId] ?? null
+  const links = read(file)
+  return Object.hasOwn(links, threadId) ? links[threadId] : null
 }
 
 export function linkThread(threadId: string, sessionId: string, trigger: string, now = new Date(), file = threadsFile()): void {
@@ -52,13 +64,25 @@ export function recordSlackThreadReply(
   }, now, threadsFile())
 }
 
+export function recordHomeThreadReply(
+  threadId: string, link: ThreadLink, messageId: string, status?: 'pending' | 'resumed',
+): void {
+  const discordReplies = { ...link.discordReplies }
+  if (status) discordReplies[messageId] = status
+  else delete discordReplies[messageId]
+  saveLink(threadId, { ...link, discordReplies }, new Date(), threadsFile())
+}
+
 function saveLink(threadId: string, link: ThreadLink, now: Date, file: string): void {
-  const cut = now.getTime() - MAX_AGE_DAYS * 86_400_000
-  const links = Object.fromEntries(Object.entries(read(file)).filter(([, l]) => Date.parse(l.linkedAt) >= cut))
-  links[threadId] = link
+  const links = Object.entries(read(file, true)).flatMap(([id, existing]) => {
+    if (!isThreadLinkExpired(existing, now)) return [[id, existing]]
+    if (!isHomeThreadLabel(existing.trigger)) return []
+    const { sessionId, trigger, linkedAt } = existing
+    return [[id, { sessionId, trigger, linkedAt }]]
+  })
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(links, null, 1) + '\n')
+  fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries([...links, [threadId, link]]), null, 1) + '\n')
   fs.renameSync(tmp, file)
 }
 
@@ -79,14 +103,11 @@ export function followUpPrompt(author: string, message: string, platform: 'Disco
 }
 
 /**
- * A thread a webhook started (a CI red, an alert: nobody asked a question) whose run ended with
- * nothing for Chip is archived, so it drops out of the sidebar (Chip, 2026-10-26: "I only want
- * the errors that require my attention"). Only a report the inbox read and found no ask in
- * (`no-ask`) qualifies: a failed run, an ask, a channel Chip reads directly, the inbox's own
- * threads and a thread a person started stay open. A reply in an archived thread reopens it.
+ * Archive quiet reports in webhook threads. Asks, failed runs, and threads
+ * that a person started stay open. A reply in an archived thread reopens it.
  */
-export function shouldArchiveThread(opts: { threadId?: string; webhookTrigger: boolean; isInbox: boolean; failed: boolean; mirror?: { status: string } | null }): boolean {
-  return Boolean(opts.threadId) && opts.webhookTrigger && !opts.isInbox && !opts.failed && opts.mirror?.status === 'no-ask'
+export function shouldArchiveThread(opts: { webhookTrigger: boolean; failed: boolean; summary: string }): boolean {
+  return opts.webhookTrigger && !opts.failed && chipAsks(opts.summary).length === 0 && !runFailed(opts.summary)
 }
 
 /** Archiving is tidying: a failure is logged and never thrown, the report has already landed. */

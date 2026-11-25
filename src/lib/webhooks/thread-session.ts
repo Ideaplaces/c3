@@ -3,7 +3,7 @@ import { DEFAULT_MODEL } from '@/lib/models'
 import { sessionManager } from '@/lib/sdk/session-manager'
 import { getSession } from '@/lib/store/sessions'
 import type { ChannelTrigger } from '@/lib/triggers/config'
-import { followUpPrompt, linkThread, sessionForThread } from './discord-threads'
+import { followUpPrompt, isThreadLinkExpired, linkThread, sessionForThread, type ThreadLink } from './discord-threads'
 
 const busyThreads = new Set<string>()
 
@@ -29,6 +29,41 @@ export function resolveResumable(key: string, triggerName: string): string | nul
 }
 
 type SessionEndListener = (sessionId: string, reason: string) => void
+
+/** Resume a report's original session, with no fallback to starting a new one. */
+export async function resumeOnly(options: {
+  link: ThreadLink
+  author: string
+  reply: string
+  model?: string
+  maxDurationMs?: number
+  isTriggerBusy: () => boolean
+  beforeResume: () => void
+  onEnded: (sessionId: string, reason: string, projectPath: string) => void
+}): Promise<'resumed' | 'busy' | 'unavailable'> {
+  const { link, author, reply, model, maxDurationMs, isTriggerBusy, beforeResume, onEnded } = options
+  if (isThreadLinkExpired(link)) return 'unavailable'
+  const { sessionId, trigger: label } = link
+  if (sessionManager.isSessionActive(sessionId)) return 'busy'
+  const session = getSession(sessionId)
+  if (!session || !getSessionJSONLPath(sessionId)) return 'unavailable'
+  if (isTriggerBusy()) return 'busy'
+
+  beforeResume()
+  const onSessionEnded: SessionEndListener = (sid, reason) => {
+    if (sid !== sessionId) return
+    sessionManager.removeListener('session_ended', onSessionEnded)
+    onEnded(sid, reason, session.projectPath)
+  }
+  sessionManager.on('session_ended', onSessionEnded)
+  try {
+    await sessionManager.resumeSession(sessionId, followUpPrompt(author, reply), { label, model, maxDurationMs })
+    return 'resumed'
+  } catch (err) {
+    sessionManager.removeListener('session_ended', onSessionEnded)
+    throw err
+  }
+}
 
 export async function resumeOrStart(options: {
   key: string | null
@@ -89,7 +124,7 @@ export async function resumeOrStart(options: {
   }
 }
 
-export function extractSessionSummary(events: { message: unknown }[], reason: string, maxChars: number): string {
+export function extractSessionSummary(events: { message: unknown }[], reason: string, maxChars?: number): string {
   for (let i = events.length - 1; i >= 0; i--) {
     const msg = events[i].message as { type?: string; message?: { content?: unknown } }
     if (msg.type !== 'assistant' || !msg.message) continue

@@ -200,7 +200,7 @@ describe('Scanner prompt extraction with realistic Claude Code JSONL', () => {
 
   it('handles session with file-history-snapshot, queue-operations, and progress filling most of the file', () => {
     const dir = setupProjectDir('-home-testuser-myproject')
-    const lines = [
+    const lines: Record<string, unknown>[] = [
       fileHistorySnapshot(),
       queueOperation(),
       userMessage('Start implementing the API'),

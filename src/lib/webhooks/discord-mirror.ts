@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 /**
  * Mirror a Slack alert into a Discord channel and answer it there.
  *
@@ -14,6 +16,11 @@
  */
 
 export const DISCORD_CONTENT_LIMIT = 2000
+
+/** Discord accepts a nonce of at most 25 characters. */
+export function nonceFor(key: string): string {
+  return 'nc' + createHash('sha1').update(key).digest('hex').slice(0, 22)
+}
 
 /** Leaves room for the fence bookkeeping added when a split lands mid code block. */
 const DEFAULT_CHUNK_LIMIT = 1900

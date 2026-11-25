@@ -149,6 +149,19 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   if (!trigger) return { started: false, reason: 'channel not served by this bot' }
 
   const like = toLike(msg)
+  const originReply = msg.channel.isThread() && !msg.author.bot
+    ? { threadId: msg.channel.id, messageId: msg.id, text: extractDiscordText(like) }
+    : undefined
+
+  async function skipChannelTrigger(reason: string) {
+    if (!originReply?.text) return { started: false, reason }
+    const result = await startSession(msg, {
+      channelId: msg.channelId, text: originReply.text, subjectId: msg.id, threadId: originReply.threadId,
+      followUp: originReply.text, homeThread: true, originReply,
+    })
+    return result.reason === 'ignored' ? { started: false, reason } : result
+  }
+
   let text: string
   // The message the session is about and the one that gets the thread: the
   // triggering message itself, or, for a mention trigger, the report the
@@ -159,13 +172,13 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
       ? await msg.channel.messages.fetch(like.referencedMessageId).catch(() => null)
       : null
     if (!shouldFireMention(trigger, like, referenced ? toLike(referenced) : null)) {
-      return { started: false, reason: 'not a reply that mentions the bot on a matching message' }
+      return skipChannelTrigger('not a reply that mentions the bot on a matching message')
     }
     subject = referenced as Message
     const request = stripMention(msg.content, client.user?.id ?? '')
     text = composeMentionText(toLike(subject), msg.author.username, request)
   } else {
-    if (!shouldFire(trigger, like)) return { started: false, reason: 'message does not match the trigger' }
+    if (!shouldFire(trigger, like)) return skipChannelTrigger('message does not match the trigger')
     text = extractDiscordText(like)
   }
   console.log(`[Bot] ${source} message ${msg.id} in ${trigger.name} from ${msg.author.username}: ${text.slice(0, 100).replace(/\n/g, ' ')}`)
@@ -176,7 +189,7 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
   let threadCreated = false
   if (trigger.thread) {
     try {
-      const existing = subject.thread ?? (subject.hasThread ? await subject.channel.messages.fetch(subject.id).then(m => m.thread) : null)
+      const existing = subject.thread ?? (subject.hasThread ? (await subject.channel.messages.fetch(subject.id)).thread : null)
       const thread = existing ?? await subject.startThread({
         name: threadNameFor(toLike(subject)),
         autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays,
@@ -188,7 +201,9 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
     }
   }
 
-  return startSession(msg, trigger, text, subject.id, threadId, true, undefined, threadCreated)
+  return startSession(msg, {
+    channelId: trigger.channelId, text, subjectId: subject.id, threadId, announce: true, threadCreated, originReply,
+  })
 }
 
 /**
@@ -196,7 +211,18 @@ async function handleMessage(msg: Message, source: 'gateway' | 'replay') {
  * what gets the eyes or the cross; `subjectId` and `threadId` are where the
  * answer is posted.
  */
-async function startSession(msg: Message, trigger: BotChannelTrigger, text: string, subjectId: string, threadId: string | undefined, announce: boolean, followUp?: string, threadCreated = false) {
+async function startSession(msg: Message, options: {
+  channelId: string
+  text: string
+  subjectId: string
+  threadId?: string
+  announce?: boolean
+  followUp?: string
+  threadCreated?: boolean
+  homeThread?: boolean
+  originReply?: { threadId: string; messageId: string; text: string }
+}) {
+  const { channelId, text, subjectId, threadId, announce, followUp, threadCreated = false, homeThread, originReply } = options
   try {
     const response = await fetch(`${CCC_URL}/api/webhooks/discord`, {
       method: 'POST',
@@ -205,29 +231,37 @@ async function startSession(msg: Message, trigger: BotChannelTrigger, text: stri
         'Authorization': `Bearer ${CCC_WEBHOOK_SECRET}`,
       },
       body: JSON.stringify({
-        channelId: trigger.channelId,
+        channelId,
         message: text,
         author: msg.author.username,
         messageId: subjectId,
         threadId,
         threadCreated,
         followUp,
+        homeThread,
+        originReply,
         callbackUrl: `http://localhost:${BOT_PORT}/callback`,
       }),
     })
 
-    const data = await response.json() as { sessionId?: string; trigger?: string; error?: string }
+    const data = await response.json() as { sessionId?: string; trigger?: string; status?: string; error?: string }
 
-    if (response.status === 409 && threadId) {
+    const busyThreadId = originReply?.threadId ?? threadId
+    if (response.status === 409 && busyThreadId) {
       // The thread's session is still answering the previous message.
-      const thread = await client.channels.fetch(threadId).catch(() => null)
+      const thread = await client.channels.fetch(busyThreadId).catch(() => null)
       if (thread?.isThread()) await thread.send(BUSY_NOTE).catch(() => {})
       return { started: false, reason: 'thread session busy' }
     }
+    if (response.ok && ['ignored', 'unavailable', 'already'].includes(data.status ?? '')) {
+      return { started: false, reason: data.status }
+    }
     if (response.ok && data.sessionId) {
-      pendingSessions.set(data.sessionId, { channelId: trigger.channelId, messageId: subjectId, threadId, startedAt: Date.now() })
+      const pendingThreadId = data.status === 'resumed' ? originReply?.threadId ?? threadId : threadId
+      pendingSessions.set(data.sessionId, { channelId, messageId: subjectId, threadId: pendingThreadId, startedAt: Date.now() })
       console.log(`[Bot] Session started: ${data.sessionId} for trigger "${data.trigger}"`)
-      if (threadId && announce) {
+      if (followUp) await react(msg, '👀')
+      if (threadId && announce && data.status !== 'resumed') {
         const thread = await client.channels.fetch(threadId).catch(() => null)
         if (thread?.isThread()) {
           await thread.send(`On it. Session: ${BASE_URL}/sessions/${data.sessionId}`).catch(() => {})
@@ -281,25 +315,35 @@ async function startThreadReply(msg: Message, thread: ThreadChannel, trigger: Bo
     .filter(m => m.id !== msg.id && m.id !== starter?.id && !m.system)
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
     .map(asLine)
-  const text = composeThreadText(starter ? asLine(starter) : null, replies, msg.author.username, extractDiscordText(toLike(msg)))
+  const followUp = extractDiscordText(toLike(msg))
+  const text = composeThreadText(starter ? asLine(starter) : null, replies, msg.author.username, followUp)
   console.log(`[Bot] thread reply ${msg.id} in ${trigger.name}/${thread.id} from ${msg.author.username}: ${msg.content.slice(0, 100).replace(/\n/g, ' ')}`)
-  await react(msg, '👀')
   // `text` carries the whole thread for a new session; `followUp` is the new message
   // alone, which the server uses to resume the thread's own session when it has one.
-  return startSession(msg, trigger, text, msg.id, thread.id, false, extractDiscordText(toLike(msg)))
+  return startSession(msg, { channelId: trigger.channelId, text, subjectId: msg.id, threadId: thread.id, followUp })
+}
+
+async function handleHomeThreadReply(msg: Message) {
+  if (!msg.channel.isThread() || !msg.channel.parentId) return
+  const followUp = extractDiscordText(toLike(msg))
+  if (!followUp) return
+  await startSession(msg, {
+    channelId: msg.channel.parentId, text: followUp, subjectId: msg.id, threadId: msg.channel.id, followUp, homeThread: true,
+  })
 }
 
 client.on('messageCreate', async (msg) => {
-  const route = routeMessage(myTriggers(), {
+  const route = routeMessage(Object.values(loadTriggers().channels), {
     channelId: msg.channelId,
     parentId: msg.channel.isThread() ? msg.channel.parentId : null,
     isThread: msg.channel.isThread(),
     isSelf: msg.author.id === client.user?.id,
     isSystem: msg.system,
     authorIsBot: msg.author.bot,
-  })
+  }, BOT_NAME)
   if (route.kind === 'channel') await handleMessage(msg, 'gateway')
   else if (route.kind === 'thread') await handleThreadReply(msg, route.trigger)
+  else if (route.kind === 'home') await handleHomeThreadReply(msg)
 })
 
 function readJsonBody(req: http.IncomingMessage): Promise<string> {
@@ -316,7 +360,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<string> {
 async function onSessionCallback(body: string) {
   const data = JSON.parse(body) as {
     sessionId: string; reason: string; summary: string; projectPath?: string
-    failed?: boolean; failureReason?: string; replied?: boolean
+    failed?: boolean; failureReason?: string; replied?: boolean; nonce?: string
   }
   const pending = pendingSessions.get(data.sessionId)
   if (!pending) return
@@ -324,19 +368,20 @@ async function onSessionCallback(body: string) {
   if (data.replied) return
 
   const content = formatSessionResult(data, BASE_URL)
+  const message = { content, ...(data.nonce ? { nonce: data.nonce, enforceNonce: true } : {}) }
   const target = await client.channels.fetch(pending.threadId ?? pending.channelId).catch(() => null)
   if (!target || !('send' in target)) return
   if (pending.threadId) {
-    await (target as TextChannel).send(content)
+    await (target as TextChannel).send(message)
     console.log(`[Bot] Posted session result in thread ${pending.threadId}`)
     return
   }
   try {
     const originalMessage = await (target as TextChannel).messages.fetch(pending.messageId)
-    await originalMessage.reply(content)
+    await originalMessage.reply(message)
     console.log(`[Bot] Replied to message ${pending.messageId} with session result`)
   } catch {
-    await (target as TextChannel).send(content)
+    await (target as TextChannel).send(message)
     console.log(`[Bot] Posted session result in channel ${pending.channelId}`)
   }
 }

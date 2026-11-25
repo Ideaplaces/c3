@@ -159,11 +159,12 @@ describe('routeMessage', () => {
     { name: 'mention', channelId: 'C3', thread: true, mention: true },
     { name: 'reports', channelId: 'C4', thread: true, webhookId: 'W' },
     { name: 'on-a-thread', channelId: 'T9', thread: true },
+    { name: 'named', channelId: 'CN', thread: true, bot: 'spotter' },
   ]
   const base = { channelId: 'C1', parentId: null as string | null, isThread: false, isSelf: false, isSystem: false, authorIsBot: false }
-  const route = (over: Partial<typeof base>) => {
-    const r = routeMessage(triggers, { ...base, ...over })
-    return r.kind === 'ignore' ? 'ignore' : `${r.kind}:${r.trigger.name}`
+  const route = (over: Partial<typeof base>, botName?: string) => {
+    const r = routeMessage(triggers, { ...base, ...over }, botName)
+    return 'trigger' in r ? `${r.kind}:${r.trigger.name}` : r.kind
   }
   it('sends a channel message to its trigger, as before', () => {
     expect(route({})).toBe('channel:fan')
@@ -175,17 +176,26 @@ describe('routeMessage', () => {
   it('lets a trigger configured on a thread win over its parent', () => {
     expect(route({ channelId: 'T9', parentId: 'C1', isThread: true })).toBe('channel:on-a-thread')
   })
-  it('ignores the bot itself, system messages and other bots in threads', () => {
+  it('ignores the bot itself, system messages and bots on either reply path', () => {
     expect(route({ isSelf: true })).toBe('ignore')
     expect(route({ isSystem: true })).toBe('ignore')
     expect(route({ channelId: 'T1', parentId: 'C1', isThread: true, authorIsBot: true })).toBe('ignore')
+    expect(route({ channelId: 'T1', parentId: 'C8', isThread: true, authorIsBot: true })).toBe('ignore')
   })
-  it('ignores threads under channels without threads, mention triggers, webhook-pinned triggers, or no trigger', () => {
-    expect(route({ channelId: 'T1', parentId: 'C2', isThread: true })).toBe('ignore')
-    expect(route({ channelId: 'T1', parentId: 'C3', isThread: true })).toBe('ignore')
-    expect(route({ channelId: 'T1', parentId: 'C4', isThread: true })).toBe('ignore')
-    expect(route({ channelId: 'T1', parentId: 'C8', isThread: true })).toBe('ignore')
+  it('lets a directly configured thread still handle webhook posts as channel messages', () => {
+    expect(route({ channelId: 'T9', parentId: 'C1', isThread: true, authorIsBot: true })).toBe('channel:on-a-thread')
+  })
+  it('checks home links for human replies that have no configured thread route', () => {
+    for (const parentId of ['C2', 'C3', 'C4', 'C8']) {
+      expect(route({ channelId: 'T1', parentId, isThread: true })).toBe('home')
+    }
     expect(route({ channelId: 'C8' })).toBe('ignore')
+    expect(route({ channelId: 'T1', isThread: true })).toBe('ignore')
+  })
+  it('runs the home fallback only on the default bot and keeps a named thread route with its owner', () => {
+    expect(route({ channelId: 'T1', parentId: 'C8', isThread: true }, 'spotter')).toBe('ignore')
+    expect(route({ channelId: 'T1', parentId: 'CN', isThread: true }, 'spotter')).toBe('thread:named')
+    expect(route({ channelId: 'T1', parentId: 'CN', isThread: true })).toBe('ignore')
   })
 })
 

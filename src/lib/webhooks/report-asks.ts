@@ -1,7 +1,5 @@
-import crypto from 'crypto'
-
 /**
- * Which lines of an agent's post are for Chip, the input of the #needs-chip inbox.
+ * Which lines of an agent's report ask Chip for something or report a failed run.
  *
  * The grammar is the one the Discord poster gates on (`~/.c3/scripts/discord/post.py`, ASK and
  * BARE_ASK), narrowed to Chip: `Needs from you:`, `Needs you:`, `Needs Chip:`, `Needs from Chip:`.
@@ -50,20 +48,4 @@ export function runFailed(text: string): string | null {
     if (m) return m[1].trim() || 'the run failed'
   }
   return null
-}
-
-/**
- * The identity of an ask for deduplication: the whole ask, word for word, lower case, without
- * links, markdown or punctuation. A reworded ask gets another key, so it is posted again: exact
- * repeats are what this catches (a daily digest restating the same open item). The whole ask,
- * not the question before its "?": "Merge it? The eli-kpi fix." and "Merge it? The pricing fix."
- * are two asks.
- */
-export function askKey(ask: string): string {
-  const words = ask
-    .replace(/\[([^\]]*)\]\(([^)]*)\)/g, '$1 $2')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}#]+/gu, ' ')
-    .trim()
-  return crypto.createHash('sha1').update(words || ask).digest('hex').slice(0, 16)
 }

@@ -205,25 +205,25 @@ export interface IncomingLike {
   authorIsBot: boolean
 }
 
-export type Route<T> = { kind: 'channel'; trigger: T } | { kind: 'thread'; trigger: T } | { kind: 'ignore' }
+export type Route<T> = { kind: 'channel'; trigger: T } | { kind: 'thread'; trigger: T } | { kind: 'home' } | { kind: 'ignore' }
 
 /**
  * Where one gateway message goes. A message in a trigger's channel (or in a thread
  * that is itself a trigger) takes the normal path. A person replying inside a
  * thread under a `thread: true` trigger is talking to the same agent, so it starts
- * a follow-up session there (Chip, 2026-10-14, on the superfan channels: "it should
- * be a thread with a subsection", the way Slack threads work). Never for bots, the
- * bot itself, Discord's system messages, mention triggers, or a trigger pinned to a
- * webhook: its threads are where people talk next to an app's reports for free.
+ * a follow-up there. When no configured route owns the thread, the default bot
+ * checks whether C3 linked it to a report. Only human replies take either thread path.
  */
-export function routeMessage<T extends BotChannelTrigger>(triggers: T[], msg: IncomingLike): Route<T> {
+export function routeMessage<T extends BotChannelTrigger>(triggers: T[], msg: IncomingLike, botName = DEFAULT_BOT_NAME): Route<T> {
   if (msg.isSelf || msg.isSystem) return { kind: 'ignore' }
   const own = triggers.find(t => t.channelId === msg.channelId)
-  if (own) return { kind: 'channel', trigger: own }
+  if (own) return (own.bot ?? DEFAULT_BOT_NAME) === botName ? { kind: 'channel', trigger: own } : { kind: 'ignore' }
   if (!msg.isThread || msg.authorIsBot || !msg.parentId) return { kind: 'ignore' }
   const parent = triggers.find(t => t.channelId === msg.parentId)
-  if (!parent || !parent.thread || parent.mention || parent.webhookId) return { kind: 'ignore' }
-  return { kind: 'thread', trigger: parent }
+  if (parent?.thread && !parent.mention && !parent.webhookId) {
+    return (parent.bot ?? DEFAULT_BOT_NAME) === botName ? { kind: 'thread', trigger: parent } : { kind: 'ignore' }
+  }
+  return botName === DEFAULT_BOT_NAME ? { kind: 'home' } : { kind: 'ignore' }
 }
 
 /** How long a thread waits on an unanswered session before taking the next reply anyway. */

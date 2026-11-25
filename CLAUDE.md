@@ -6,7 +6,7 @@
 
 ## CRITICAL: Push Every Change
 
-C3 config lives in git (`Ideaplaces/c3` for the tool, `Ideaplaces/c3-chip` for Chip's private triggers and prompts). **Any edit to `ecosystem.config.cjs`, `cron-scheduler.ts`, `discord-bot.ts`, `slack-poller.ts`, or the triggers repo must be committed AND pushed before you consider the work done.** The scheduler PM2 process reads from the local working tree, but any machine that syncs the repo will overwrite your un-pushed changes. We have lost a morning to this — a trigger was set up, never pushed, and no one could find it. Always: edit → commit → push → `npx pm2 restart c3-cron-scheduler --update-env` if needed.
+C3 config lives in git (`Ideaplaces/c3` for the tool, `Ideaplaces/c3-chip` for Chip's private triggers and prompts). **Any edit to `ecosystem.config.cjs`, `cron-scheduler.ts`, `discord-bot.ts`, `slack-poller.ts`, or the triggers repo must be committed AND pushed before you consider the work done.** The scheduler PM2 process reads from the local working tree, but any machine that syncs the repo will overwrite your un-pushed changes. We have lost a morning to this. A trigger was set up, never pushed, and no one could find it. Always: edit → commit → push → `npx pm2 restart c3-cron-scheduler --update-env` if needed.
 
 ## Overview
 
@@ -128,6 +128,24 @@ watched Slack channel its own Discord twin so the alert and its answer stay
 together. The agent's prompt must then treat its final message as the
 deliverable and never post anywhere itself. See
 `src/lib/webhooks/discord-mirror.ts`.
+
+### Replies to Discord reports in their home channels
+
+The shared Discord poster registers surfaced reports with `POST /api/webhooks/inbox`.
+C3 uses the report's Discord message ID as the thread ID and links it to the
+original session when its live label or stored source is `cron:<name>` or
+`slack:<name>`. Registering the same message and session twice is a no-op.
+Registering the message for a different session returns 409. C3 also links
+reports posted to Discord by the Slack webhook.
+
+A human reply in a linked thread resumes the original session with just the
+new reply. C3 uses the reply's Discord message ID to deduplicate delivery.
+The link takes priority over a channel trigger. The default bot
+checks for home links when it sees an otherwise unrouted thread reply. C3 ignores
+unlinked threads on this path. A busy session asks the person to try again.
+After 30 days or when the transcript is gone, C3 posts the original session
+URL in the thread. Quiet webhook reports with no ask for Chip are archived
+after successful delivery. Failed runs and reports that ask Chip stay open.
 
 ### A second Discord bot identity for a server the default bot is not in
 

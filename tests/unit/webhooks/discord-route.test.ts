@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-const { startSession, resumeSession, isSessionActive, getSession, getChannelTrigger, runPrecheck, getSessionJSONLPath, sessionEvents, runEvents, getInboxConfig, mirrorPostToInbox } = vi.hoisted(() => ({
-  sessionEvents: new (require('events').EventEmitter)(),
+const { startSession, resumeSession, isSessionActive, getSession, getChannelTrigger, getCronTrigger, getSlackTriggerByName, runningSessionWithLabel, runPrecheck, getSessionJSONLPath, sessionEvents, runEvents } = vi.hoisted(() => ({
+  sessionEvents: new (require('node:events') as typeof import('node:events')).EventEmitter(),
   runEvents: { current: [] as unknown[] },
   getSessionJSONLPath: vi.fn(),
   startSession: vi.fn(),
@@ -12,15 +12,17 @@ const { startSession, resumeSession, isSessionActive, getSession, getChannelTrig
   isSessionActive: vi.fn().mockReturnValue(false),
   getSession: vi.fn(),
   getChannelTrigger: vi.fn(),
+  getCronTrigger: vi.fn(),
+  getSlackTriggerByName: vi.fn(),
+  runningSessionWithLabel: vi.fn(),
   runPrecheck: vi.fn(),
-  getInboxConfig: vi.fn(),
-  mirrorPostToInbox: vi.fn(),
 }))
 vi.mock('@/lib/sdk/session-manager', () => ({
   sessionManager: {
     startSession,
     resumeSession,
     isSessionActive,
+    runningSessionWithLabel,
     on: (e: string, fn: (...a: unknown[]) => void) => sessionEvents.on(e, fn),
     removeListener: (e: string, fn: (...a: unknown[]) => void) => sessionEvents.removeListener(e, fn),
     getRunEvents: () => runEvents.current,
@@ -31,14 +33,11 @@ vi.mock('@/lib/store/sessions', () => ({ getSession }))
 vi.mock('@/lib/triggers/precheck', () => ({ runPrecheck }))
 vi.mock('@/lib/usage', () => ({ recordSkippedRun: vi.fn() }))
 vi.mock('@/lib/models', () => ({ DEFAULT_MODEL: 'test-model' }))
-vi.mock('@/lib/triggers/config', () => ({ getChannelTrigger, loadPromptTemplate: () => 'rendered prompt' }))
-vi.mock('@/lib/inbox/config', () => ({ getInboxConfig }))
-vi.mock('@/lib/inbox/discord', () => ({ mirrorPostToInbox }))
+vi.mock('@/lib/triggers/config', () => ({ getChannelTrigger, getCronTrigger, getSlackTriggerByName, loadPromptTemplate: () => 'rendered prompt' }))
 
 import { POST } from '@/app/api/webhooks/discord/route'
 import { sessionForThread, followUpPrompt, linkThread } from '@/lib/webhooks/discord-threads'
 import { resolveResumable } from '@/lib/webhooks/thread-session'
-import { getItem, saveItem } from '@/lib/inbox/store'
 
 const fan = { name: 'superfan-tour-calls', channelId: 'C1', prompt: 'superfan-chat.md', projectPath: '/p', permissionMode: 'bypassPermissions', model: 'm', thread: true, maxDurationMs: 1000 }
 
@@ -49,6 +48,163 @@ function post(body: Record<string, unknown>) {
     body: JSON.stringify({ channelId: 'C1', author: 'chip', messageId: 'M1', ...body }),
   }))
 }
+
+describe('discord webhook: home-thread replies', () => {
+  const reply = { channelId: 'HOME', message: 'Conversation so far', followUp: 'How many passed?', threadId: 'M0', messageId: 'R1' }
+  let discord: ReturnType<typeof vi.fn<typeof fetch>>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubEnv('CCC_WEBHOOK_SECRET', 'test-secret')
+    vi.stubEnv('C3_DISCORD_THREADS_FILE', path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discord-home-')), 'threads.json'))
+    vi.stubEnv('C3_BASE_URL', 'https://c3.test')
+    vi.stubEnv('DISCORD_BOT_TOKEN', 'tok')
+    discord = vi.fn<typeof fetch>(async () => Response.json({ id: 'NOTE' }))
+    vi.stubGlobal('fetch', discord)
+    getChannelTrigger.mockReturnValue(null)
+    startSession.mockResolvedValue('new-session')
+    isSessionActive.mockReturnValue(false)
+    runningSessionWithLabel.mockReturnValue(null)
+    getSession.mockReturnValue({ id: 'S1', projectPath: '/session-worktree', source: 'cron:daily' })
+    getSessionJSONLPath.mockReturnValue('/transcript.jsonl')
+    getCronTrigger.mockReturnValue({ model: 'cron-model', maxDurationMs: 1700, projectPath: '/cron-config' })
+    getSlackTriggerByName.mockReturnValue({ model: 'slack-model', maxDurationMs: 2100, projectPath: '/slack-config' })
+    sessionEvents.removeAllListeners()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    isSessionActive.mockReset()
+    runningSessionWithLabel.mockReset()
+    sessionEvents.removeAllListeners()
+  })
+
+  it('resumes a linked cron thread in an unconfigured channel with only the follow-up', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    const res = await post({ ...reply, homeThread: true })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ status: 'resumed', sessionId: 'S1' })
+    expect(getChannelTrigger).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+    expect(getCronTrigger).toHaveBeenCalledExactlyOnceWith('daily')
+    expect(resumeSession).toHaveBeenCalledExactlyOnceWith('S1', followUpPrompt('chip', reply.followUp), {
+      label: 'cron:daily', model: 'cron-model', maxDurationMs: 1700,
+    })
+  })
+
+  it('ignores an unlinked thread in an unconfigured channel', async () => {
+    const res = await post(reply)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ status: 'ignored' })
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resumeSession).not.toHaveBeenCalled()
+    expect(discord).not.toHaveBeenCalled()
+  })
+
+  it('ignores an unlinked home fallback even in a configured channel', async () => {
+    getChannelTrigger.mockReturnValue(fan)
+    expect(await (await post({ ...reply, homeThread: true })).json()).toEqual({ status: 'ignored' })
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it.each(['missing transcript', 'expired link'])('posts the original session URL and starts nothing for %s', async (reason) => {
+    const linkedAt = reason === 'expired link' ? new Date(Date.now() - 31 * 86_400_000) : new Date()
+    linkThread('M0', 'S1', 'cron:daily', linkedAt)
+    if (reason === 'expired link') linkThread('OTHER', 'S2', 'another-trigger')
+    else getSessionJSONLPath.mockReturnValue(null)
+    const res = await post({ ...reply, homeThread: true })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ status: 'unavailable' })
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resumeSession).not.toHaveBeenCalled()
+    expect(discord).toHaveBeenCalledOnce()
+    const [url, init] = discord.mock.calls[0]
+    expect(url).toBe('https://discord.com/api/v10/channels/M0/messages')
+    expect(JSON.parse(String(init?.body))).toMatchObject({ content: expect.stringContaining('https://c3.test/sessions/S1') })
+  })
+
+  it('prioritizes the cron link over a channel thread trigger and its precheck', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    getChannelTrigger.mockReturnValue({ ...fan, precheck: 'skip' })
+    const res = await post({ ...reply, channelId: 'C1' })
+    expect(await res.json()).toMatchObject({ status: 'resumed', sessionId: 'S1' })
+    expect(runPrecheck).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resumeSession.mock.calls[0][2].label).toBe('cron:daily')
+  })
+
+  it('uses the Slack trigger settings for a report posted from a Slack run', async () => {
+    linkThread('M0', 'S1', 'slack:alerts')
+    expect((await post({ ...reply, homeThread: true })).status).toBe(200)
+    expect(getSlackTriggerByName).toHaveBeenCalledExactlyOnceWith('alerts')
+    expect(resumeSession).toHaveBeenCalledExactlyOnceWith('S1', followUpPrompt('chip', reply.followUp), {
+      label: 'slack:alerts', model: 'slack-model', maxDurationMs: 2100,
+    })
+  })
+
+  it('returns busy if the session is active or another run owns the cron worktree', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    isSessionActive.mockReturnValueOnce(true)
+    expect((await post({ ...reply, homeThread: true })).status).toBe(409)
+    runningSessionWithLabel.mockReturnValueOnce('another-run')
+    expect((await post({ ...reply, homeThread: true })).status).toBe(409)
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resume if the reply receipt cannot be stored', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    fs.mkdirSync(`${process.env.C3_DISCORD_THREADS_FILE}.tmp`)
+    expect((await post({ ...reply, homeThread: true })).status).toBe(502)
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resume a linked reply without a Discord message ID', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    expect((await post({ ...reply, homeThread: true, messageId: undefined })).status).toBe(400)
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it('never resumes a second time if confirmation of the first resume fails', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    resumeSession.mockImplementationOnce(async () => { fs.mkdirSync(`${process.env.C3_DISCORD_THREADS_FILE}.tmp`) })
+    expect((await post({ ...reply, homeThread: true })).status).toBe(200)
+    expect((await post({ ...reply, homeThread: true })).status).toBe(503)
+    expect(resumeSession).toHaveBeenCalledOnce()
+  })
+
+  it('gives the bot the same answer nonce if the server post fails', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    const callbackUrl = 'http://localhost:8348/callback'
+    discord.mockResolvedValueOnce(new Response(null, { status: 403 }))
+    const notify = new Promise<{ replied: boolean; nonce: string }>(resolve => {
+      discord.mockImplementationOnce(async (_url, init) => {
+        resolve(JSON.parse(String(init?.body)))
+        return Response.json({ ok: true })
+      })
+    })
+    expect((await post({ ...reply, homeThread: true, callbackUrl })).status).toBe(200)
+    runEvents.current = [{ message: { type: 'assistant', message: { content: 'Five passed.' } } }]
+    sessionEvents.emit('session_ended', 'S1', 'completed')
+    const callback = await notify
+    const attempted = JSON.parse(String(discord.mock.calls[0][1]?.body))
+    expect(callback).toMatchObject({ replied: false, nonce: attempted.nonce })
+    expect(attempted).toMatchObject({ enforce_nonce: true, nonce: expect.any(String) })
+  })
+
+  it('honors a link in a thread that is itself configured as a channel trigger', async () => {
+    linkThread('M0', 'S1', 'cron:daily')
+    getChannelTrigger.mockReturnValue({ ...fan, channelId: 'M0' })
+    const res = await post({
+      channelId: 'M0', message: 'A composed mention prompt', messageId: 'subject-message',
+      originReply: { threadId: 'M0', messageId: 'R1', text: 'How many passed?' },
+    })
+    expect(await res.json()).toMatchObject({ status: 'resumed', sessionId: 'S1' })
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resumeSession.mock.calls[0][1]).toBe(followUpPrompt('chip', reply.followUp))
+  })
+})
 
 describe('discord webhook: a thread is one session', () => {
   let file: string
@@ -65,7 +221,6 @@ describe('discord webhook: a thread is one session', () => {
     runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
     runEvents.current = []
     sessionEvents.removeAllListeners()
-    getInboxConfig.mockReturnValue(null)
   })
   afterEach(() => {
     delete process.env.C3_DISCORD_THREADS_FILE
@@ -139,10 +294,15 @@ describe('discord webhook: a thread is one session', () => {
 
   it('tells a second message in the same thread it is busy while the first is still starting', async () => {
     let release!: () => void
+    let signal!: () => void
+    const inPrecheck = new Promise<void>(resolve => { signal = resolve })
     getChannelTrigger.mockReturnValue({ ...fan, precheck: 'slow' })
-    runPrecheck.mockReturnValueOnce(new Promise(r => { release = () => r({ proceed: true, exitCode: 0, reason: '' }) }))
+    runPrecheck.mockImplementationOnce(() => new Promise(resolve => {
+      release = () => resolve({ proceed: true, exitCode: 0, reason: '' })
+      signal()
+    }))
     const first = post({ message: 'q', threadId: 'T1' })
-    await new Promise(r => setTimeout(r, 10))
+    await inPrecheck
     const second = await post({ message: 'composed', threadId: 'T1', followUp: 'quick' })
     expect(second.status).toBe(409)
     release()
@@ -161,8 +321,7 @@ describe('discord webhook: a thread is one session', () => {
       sessionEvents.removeAllListeners()
       await post({ message: 'composed', threadId: 'T1', followUp: 'and last month?' })
       runEvents.current = [{ message: { type: 'assistant', message: { content: [{ type: 'text', text: 'Last month: 31 calls.' }] } } }]
-      sessionEvents.emit('session_ended', 'S1', 'completed')
-      await new Promise(r => setTimeout(r, 10))
+      await Promise.all(sessionEvents.listeners('session_ended').map(listener => listener('S1', 'completed')))
       expect(sent.join()).toContain('Last month: 31 calls.')
       expect(sent.join()).not.toContain('failed')
     } finally {
@@ -224,82 +383,6 @@ describe('discord-threads store', () => {
   })
 })
 
-describe('discord webhook: the #needs-chip inbox', () => {
-  const inboxTrigger = { ...fan, name: 'needs-chip', channelId: 'INBOX' }
-  let dir: string
-  let realFetch: typeof fetch
-  beforeEach(() => {
-    vi.clearAllMocks()
-    sessionEvents.removeAllListeners()
-    process.env.CCC_WEBHOOK_SECRET = 'test-secret'
-    process.env.DISCORD_BOT_TOKEN = 'tok'
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inbox-route-'))
-    process.env.C3_DISCORD_THREADS_FILE = path.join(dir, 'threads.json')
-    process.env.C3_INBOX_FILE = path.join(dir, 'needs-chip.json')
-    getInboxConfig.mockReturnValue({ channelId: 'INBOX', guildId: 'G', trigger: 'needs-chip', skipChannelIds: [] })
-    isSessionActive.mockReturnValue(false)
-    getSession.mockReturnValue({ id: 'CRON1' })
-    getSessionJSONLPath.mockReturnValue('/x/CRON1.jsonl')
-    runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
-    realFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ id: 'REPLY1' }))) as typeof fetch
-  })
-  afterEach(() => {
-    globalThis.fetch = realFetch
-    delete process.env.DISCORD_BOT_TOKEN
-    delete process.env.C3_INBOX_FILE
-    delete process.env.C3_DISCORD_THREADS_FILE
-  })
-
-  it('resumes the session that asked when Chip answers in the inbox thread, and marks the item answered', async () => {
-    getChannelTrigger.mockReturnValue(inboxTrigger)
-    linkThread('L1', 'CRON1', 'needs-chip')
-    saveItem({ sourceKey: 'M1', askKeys: ['k'], status: 'open', channelName: 'plusgrade', createdAt: new Date().toISOString(), inboxMessageId: 'L1', sessionId: 'CRON1' })
-    const res = await post({ channelId: 'INBOX', message: 'composed', threadId: 'L1', followUp: 'yes, merge it', messageId: 'R1' })
-    expect(await res.json()).toMatchObject({ status: 'resumed', sessionId: 'CRON1' })
-    expect(resumeSession.mock.calls[0][0]).toBe('CRON1')
-    expect(resumeSession.mock.calls[0][1]).toContain('yes, merge it')
-    expect(getItem('M1')?.status).toBe('answered')
-  })
-
-  it('copies a finished report that asks Chip into the inbox, with the id of the posted reply', async () => {
-    getChannelTrigger.mockReturnValue(fan)
-    startSession.mockResolvedValue('S7')
-    await post({ message: 'how were calls?', threadId: 'T1' })
-    runEvents.current = [{ message: { type: 'assistant', message: { content: [{ type: 'text', text: 'Needs from you: add per-step timing?' }] } } }]
-    sessionEvents.emit('session_ended', 'S7', 'completed')
-    await new Promise(r => setTimeout(r, 10))
-    expect(mirrorPostToInbox).toHaveBeenCalledWith({
-      sourceChannelId: 'C1', sourceThreadId: 'T1', sourceMessageId: 'REPLY1',
-      text: 'Needs from you: add per-step timing?', agent: 'discord:superfan-tour-calls', sessionId: 'S7',
-    })
-    const sent = JSON.parse(String((globalThis.fetch as unknown as { mock: { calls: [unknown, { body: string }][] } }).mock.calls[0][1].body))
-    expect(sent).toMatchObject({ enforce_nonce: true })
-    expect(String(sent.nonce)).toHaveLength(24)
-  })
-
-  it('copies a session that died as a failed run', async () => {
-    getChannelTrigger.mockReturnValue(fan)
-    startSession.mockResolvedValue('S9')
-    await post({ message: 'q', threadId: 'T1' })
-    runEvents.current = []
-    sessionEvents.emit('session_ended', 'S9', 'crashed: out of memory')
-    await new Promise(r => setTimeout(r, 10))
-    expect(mirrorPostToInbox.mock.calls[0][0].text).toBe('Run failed: crashed: out of memory')
-  })
-
-  it('never copies the answer given in an inbox thread back into the inbox', async () => {
-    getChannelTrigger.mockReturnValue(inboxTrigger)
-    startSession.mockResolvedValue('S8')
-    await post({ channelId: 'INBOX', message: 'q', threadId: 'L9' })
-    runEvents.current = [{ message: { type: 'assistant', message: { content: [{ type: 'text', text: 'Needs from you: one more thing?' }] } } }]
-    sessionEvents.emit('session_ended', 'S8', 'completed')
-    await new Promise(r => setTimeout(r, 10))
-    expect(globalThis.fetch).toHaveBeenCalled()
-    expect(mirrorPostToInbox).not.toHaveBeenCalled()
-  })
-})
-
 describe('discord webhook: a thread whose run needs nothing from Chip is archived', () => {
   const ciRed = { ...fan, name: 'tour-ci-red', webhookId: 'W1' }
   let dir: string
@@ -313,7 +396,6 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-route-'))
     process.env.C3_DISCORD_THREADS_FILE = path.join(dir, 'threads.json')
     getChannelTrigger.mockReturnValue(ciRed)
-    getInboxConfig.mockReturnValue({ channelId: 'INBOX', guildId: 'G', trigger: 'needs-chip', skipChannelIds: [] })
     runPrecheck.mockResolvedValue({ proceed: true, exitCode: 0, reason: '' })
     startSession.mockResolvedValue('S1')
     calls = []
@@ -329,41 +411,32 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
     delete process.env.C3_DISCORD_THREADS_FILE
   })
 
-  async function finish(reason: string, text: string, mirror: unknown, body: Record<string, unknown> = {}) {
-    mirrorPostToInbox.mockResolvedValue(mirror)
+  async function finish(reason: string, text: string, body: Record<string, unknown> = {}) {
     await post({ message: 'red run', threadId: 'T1', ...body })
     runEvents.current = text ? [{ message: { type: 'assistant', message: { content: [{ type: 'text', text }] } } }] : []
-    sessionEvents.emit('session_ended', 'S1', reason)
-    await new Promise(r => setTimeout(r, 10))
+    await Promise.all(sessionEvents.listeners('session_ended').map(listener => listener('S1', reason)))
     return calls.filter(c => c.method === 'PATCH')
   }
 
-  it('archives the thread after the report when the run asked nothing and did not fail', async () => {
-    const patches = await finish('completed', 'Flaky test, fix PR opened with auto-merge.', { status: 'no-ask' })
+  it('archives the thread after a quiet report with the inbox retired', async () => {
+    const patches = await finish('completed', 'Flaky test, fix PR opened with auto-merge.')
     expect(patches).toEqual([{ url: 'https://discord.com/api/v10/channels/T1', method: 'PATCH', body: JSON.stringify({ archived: true }) }])
-    expect(calls.findIndex(c => c.method === 'POST')).toBeLessThan(calls.findIndex(c => c.method === 'PATCH'))
+    expect(calls.map(c => c.method)).toEqual(['POST', 'PATCH'])
   })
 
   it('keeps the thread open when the report asks Chip', async () => {
-    expect(await finish('completed', 'Needs from you: merge it?', { status: 'posted', inboxMessageId: 'L1' })).toEqual([])
+    expect(await finish('completed', `${'Long report. '.repeat(150)}\nNeeds from you: merge it?`)).toEqual([])
+    expect(calls.map(c => c.method)).toEqual(['POST'])
   })
 
   it('keeps the thread open when the run failed', async () => {
-    expect(await finish('crashed: stalled', '', { status: 'no-ask' })).toEqual([])
-  })
-
-  it('keeps the thread open in a channel Chip reads directly', async () => {
-    expect(await finish('completed', 'Done.', { status: 'skipped', reason: 'channel Chip reads directly' })).toEqual([])
-  })
-
-  it('keeps an inbox thread open', async () => {
-    getChannelTrigger.mockReturnValue({ ...ciRed, name: 'needs-chip', channelId: 'INBOX' })
-    expect(await finish('completed', 'Done.', { status: 'no-ask' }, { channelId: 'INBOX' })).toEqual([])
+    expect(await finish('crashed: stalled', '')).toEqual([])
+    expect(calls.map(c => c.method)).toEqual(['POST'])
   })
 
   it('keeps a thread a person started open: their answer is for them', async () => {
     getChannelTrigger.mockReturnValue(fan)
-    expect(await finish('completed', 'Last month: 31 calls.', { status: 'no-ask' })).toEqual([])
+    expect(await finish('completed', 'Last month: 31 calls.')).toEqual([])
   })
 
   it('keeps the thread open when the archive call fails, after logging it', async () => {
@@ -372,7 +445,7 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
       return init?.method === 'PATCH' ? new Response('{}', { status: 403 }) : new Response(JSON.stringify({ id: 'REPLY1' }))
     }) as typeof fetch
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(await finish('completed', 'Done.', { status: 'no-ask' })).toHaveLength(1)
+    expect(await finish('completed', 'Done.')).toHaveLength(1)
     expect(err).toHaveBeenCalledWith('[Webhook] Archiving thread T1 failed: 403')
     err.mockRestore()
   })
@@ -392,13 +465,6 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
     expect(calls).toEqual([])
   })
 
-  it('leaves an inbox thread alone on a skip', async () => {
-    getChannelTrigger.mockReturnValue({ ...ciRed, name: 'needs-chip', channelId: 'INBOX', precheck: 'seen' })
-    runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'nothing' })
-    await post({ channelId: 'INBOX', message: 'x', threadId: 'T1', threadCreated: true })
-    expect(calls).toEqual([])
-  })
-
   it('leaves the thread open when a skipped message is a reply in it', async () => {
     getChannelTrigger.mockReturnValue({ ...ciRed, precheck: 'seen' })
     runPrecheck.mockResolvedValue({ proceed: false, exitCode: 3, reason: 'already handled' })
@@ -415,6 +481,6 @@ describe('discord webhook: a thread whose run needs nothing from Chip is archive
 
   it('never archives a channel message that has no thread', async () => {
     getChannelTrigger.mockReturnValue({ ...ciRed, thread: undefined })
-    expect(await finish('completed', 'Done.', { status: 'no-ask' }, { threadId: undefined })).toEqual([])
+    expect(await finish('completed', 'Done.', { threadId: undefined })).toEqual([])
   })
 })

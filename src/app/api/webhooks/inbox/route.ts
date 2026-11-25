@@ -1,11 +1,8 @@
-import { mirrorPostToInbox } from '@/lib/inbox/discord'
+import { linkHomeThread } from '@/lib/webhooks/home-thread'
 
 /**
- * Hand a post that landed in Discord to the #needs-chip inbox. Called by the shared poster
- * (`~/.c3/scripts/discord/post.py`) after an agent's report is accepted; the server owns the
- * inbox so the thread links and the item store have one writer. A 502 means "try again with the
- * same body": the poster keeps the record in its outbox until it gets a 2xx. It lives under
- * /api/webhooks/ so the sign-in middleware lets the shared secret through.
+ * The shared Discord poster calls this after posting a report, before a thread
+ * exists. A thread opened on that report has the same ID as the source message.
  */
 export async function POST(request: Request) {
   const expected = process.env.CCC_WEBHOOK_SECRET
@@ -13,27 +10,29 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: Record<string, unknown>
+  let body: unknown
   try {
     body = await request.json()
   } catch {
     return Response.json({ error: 'Body is not JSON' }, { status: 400 })
   }
-  const str = (k: string) => (typeof body[k] === 'string' && body[k] ? (body[k] as string) : undefined)
-  const sourceChannelId = str('sourceChannelId')
-  const sourceMessageId = str('sourceMessageId')
-  const text = str('text')
-  if (!sourceChannelId || !sourceMessageId || !text) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Expected a report object' }, { status: 400 })
+  }
+  const { sourceChannelId, sourceMessageId, text, sessionId } = body as Record<string, unknown>
+  const nonempty = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim())
+  if (!nonempty(sourceChannelId) || !nonempty(sourceMessageId) || !nonempty(text)) {
     return Response.json({ error: 'sourceChannelId, sourceMessageId and text are required' }, { status: 400 })
   }
+  if (sessionId !== undefined && !nonempty(sessionId)) {
+    return Response.json({ error: 'sessionId must be a nonempty string' }, { status: 400 })
+  }
 
-  const result = await mirrorPostToInbox({
-    sourceChannelId,
-    sourceMessageId,
-    sourceThreadId: str('sourceThreadId'),
-    text,
-    agent: str('agent'),
-    sessionId: str('sessionId'),
-  })
-  return Response.json(result, { status: result.status === 'failed' ? 502 : 200 })
+  try {
+    const status = linkHomeThread(sourceMessageId, sessionId)
+    return Response.json({ status }, { status: status === 'conflict' ? 409 : 200 })
+  } catch (err) {
+    console.error(`[Discord Home Thread] Could not link report ${sourceMessageId}:`, err)
+    return Response.json({ error: 'Could not link report' }, { status: 502 })
+  }
 }

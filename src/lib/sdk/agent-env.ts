@@ -11,8 +11,8 @@
  * is restarted from one. The Discord poster gates only these runs, posting an ask or a failed run
  * and nothing else (2026-10-18); a person's message must never be dropped by it.
  *
- * C3_TRIGGER_NAME is the session's label (`cron:plusgrade-pr-review`), so a post an agent makes
- * can say which agent made it: the #needs-chip inbox shows it beside the ask.
+ * C3_TRIGGER_NAME is the session's label (`cron:plusgrade-pr-review`). The Discord poster
+ * includes it as a hint, and C3 reads the session's own label when it links the report.
  */
 export function agentEnv(base: Record<string, string | undefined>, sessionId: string, label?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...base }

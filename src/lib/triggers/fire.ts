@@ -36,6 +36,11 @@ const MAX_CHAIN = 8
 // worktree, which is what the busy refusal exists to stop (2026-09-14).
 const firing = new Set<string>()
 
+/** Check both the running session and a launch still in its precheck. */
+export function runningCronSession(label: string): string | null {
+  return sessionManager.runningSessionWithLabel(label) ?? (firing.has(label) ? 'starting' : null)
+}
+
 export async function fireCronTrigger(name: string, cause: FireCause): Promise<FireResult> {
   const trigger = getCronTrigger(name)
   if (!trigger) {
@@ -82,7 +87,7 @@ export async function fireCronTrigger(name: string, cause: FireCause): Promise<F
   // watermarks, its checkout and its branch; a second one started beside it
   // races all three. Refused before the precheck, which may itself reset a
   // worktree the running session is using.
-  const running = sessionManager.runningSessionWithLabel(label) ?? (firing.has(label) ? 'starting' : null)
+  const running = runningCronSession(label)
   if (running) {
     const reason = `previous run ${running} still going`
     console.log(`[Cron] Refused "${trigger.name}": ${reason}`)
